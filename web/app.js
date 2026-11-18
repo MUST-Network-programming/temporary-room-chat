@@ -1,6 +1,24 @@
 'use strict';
 // 浏览器只持有当前标签页的会话；令牌不能当成昵称，恢复身份由服务器验证。
 const $ = id => document.getElementById(id);
+const colorScheme = matchMedia('(prefers-color-scheme: dark)');
+const themeControl = $('theme');
+try {
+  const saved = localStorage.getItem('temporary-chat-theme');
+  if (saved === 'light' || saved === 'dark') themeControl.value = saved;
+} catch (_) {}
+function applyTheme() {
+  const dark = themeControl.value === 'dark' || (themeControl.value === 'system' && colorScheme.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#161917' : '#f7f8f7';
+}
+themeControl.addEventListener('change', () => {
+  applyTheme();
+  try { localStorage.setItem('temporary-chat-theme', themeControl.value); } catch (_) {}
+});
+colorScheme.addEventListener('change', applyTheme);
+applyTheme();
+
 const stickers = {wave:'👋', ok:'👌', party:'🎉', heart:'💚'};
 const stickerNames = {wave:'打招呼', ok:'收到', party:'庆祝', heart:'喜欢'};
 const recentKey = 'temporary-chat-recent';
@@ -13,7 +31,7 @@ function renderRecent() {
   const select = $('recent');
   select.replaceChildren(new Option('选择最近房间', ''));
   for (const item of recent) select.add(new Option(item.name + ' · ' + item.room, item.room));
-  select.hidden = $('recent-label').hidden = !recent.length;
+  $('recent-field').hidden = !recent.length;
   $('room-recent').hidden = !recent.length;
   $('room-recent-list').replaceChildren(...recent.map(item => {
     const entry = document.createElement('li');
@@ -42,7 +60,7 @@ function saveLogin(token) {
 function showLobby() {
   const allowed = authRequired === false || Boolean(account);
   $('account-panel').hidden = authRequired !== true || allowed;
-  $('lobby').hidden = !allowed;
+  $('lobby').hidden = !allowed || !$('room-view').hidden;
   $('nickname-field').hidden = authRequired !== false;
   $('logout').hidden = $('signed-in').hidden = !account;
   $('signed-in').textContent = account ? '当前账号 ' + account : '';
@@ -62,10 +80,13 @@ function persist() {
   try { session ? sessionStorage.setItem(storageKey, JSON.stringify(session)) : sessionStorage.removeItem(storageKey); } catch (_) { /* 隐私模式下不保证刷新恢复。 */ }
 }
 function notice(text = '') {
-  const inRoom = !$('room-view').hidden;
-  $('notice').textContent = inRoom ? '' : text;
-  $('room-notice').textContent = inRoom ? text : '';
-  $('room-notice').hidden = !inRoom || !text;
+  const target = !$('room-view').hidden ? $('room-notice') :
+    !$('account-panel').hidden ? $('account-notice') : $('notice');
+  for (const id of ['notice', 'account-notice', 'room-notice']) {
+    const element = $(id);
+    element.textContent = element === target ? text : '';
+    element.hidden = element !== target || !text;
+  }
 }
 const compactRoom = matchMedia('(max-width: 680px)');
 function showRoomInfo(expanded) {
@@ -76,12 +97,22 @@ $('room-info').addEventListener('click', () => {
   const expanded = $('room-info').getAttribute('aria-expanded') === 'true';
   showRoomInfo(!expanded);
 });
+function resizeDraft() {
+  const input = $('message');
+  // 先清掉旧高度，删除文字或发送后才能缩回一行。
+  input.style.height = 'auto';
+  input.style.height = (input.scrollHeight + 2) + 'px';
+}
+function draftChanged() {
+  resizeDraft();
+  controls();
+}
 function controls() {
   const online = socket && socket.readyState === WebSocket.OPEN;
   const allowed = authRequired === false || Boolean(account);
   $('account-submit').disabled = !online || authPending;
   $('create').disabled = $('join').disabled = !online || !allowed || pending;
-  $('send').disabled = !online || !joined;
+  $('send').disabled = !online || !joined || !$('message').value.trim();
   $('rename').disabled = !online || !joined;
   $('leave').disabled = !online || !joined;
   $('close-room').disabled = !online || !joined;
@@ -100,18 +131,49 @@ function resetRoom(message) {
   session = null; joined = false; pending = false; restoring = false; persist();
   $('room-view').hidden = true; showLobby();
   showRoomInfo(false); $('room-settings').open = false;
+  showExpressions(false);
   $('close-room').hidden = true; $('members').replaceChildren();
   $('member-count').textContent = '0';
   notice(message); controls();
 }
-function systemMessage(text) {
-  const p = document.createElement('p'); p.className = 'system-message'; p.textContent = text;
-  $('messages').append(p); trimMessages();
+const messageList = $('messages');
+const latestButton = $('latest');
+let followingLatest = true;
+
+function scrollToLatest() {
+  followingLatest = true;
+  messageList.scrollTop = messageList.scrollHeight;
+  latestButton.hidden = true;
 }
-function trimMessages() {
-  // 限制当前页面中的消息节点数量。
-  while ($('messages').children.length > 500) $('messages').firstElementChild.remove();
-  $('messages').scrollTop = $('messages').scrollHeight;
+messageList.addEventListener('scroll', () => {
+  followingLatest = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 24;
+  latestButton.hidden = followingLatest;
+});
+latestButton.addEventListener('click', () => {
+  scrollToLatest();
+  messageList.focus({preventScroll:true});
+});
+new ResizeObserver(() => {
+  if (followingLatest) scrollToLatest();
+}).observe(messageList);
+
+function appendMessage(node) {
+  // 阅读旧消息时保留位置，清理最早的 DOM 节点也不改变正在读的内容。
+  messageList.append(node);
+  while (messageList.children.length > 500) {
+    const previousHeight = messageList.scrollHeight;
+    const previousTop = messageList.scrollTop;
+    messageList.firstElementChild.remove();
+    if (!followingLatest) messageList.scrollTop = previousTop - (previousHeight - messageList.scrollHeight);
+  }
+  if (followingLatest) scrollToLatest();
+  else latestButton.hidden = false;
+}
+function systemMessage(text) {
+  const p = document.createElement('p');
+  p.className = 'system-message';
+  p.textContent = text;
+  appendMessage(p);
 }
 function onMessage(event) {
   let data;
@@ -144,9 +206,11 @@ function onMessage(event) {
       $('expiry').textContent = `房间到期：${new Date(data.expires * 1000).toLocaleString('zh-CN')}`;
       $('rename').hidden = !data.owner;
       setRoomName(data.name || '同行房间');
-      $('messages').replaceChildren();
+      followingLatest = true;
+      latestButton.hidden = true;
+      messageList.replaceChildren();
       systemMessage(wasRestoring ? '已恢复连接，以下是房间保留的最近消息。' : '已加入房间。');
-      notice(); controls();
+      notice(); draftChanged();
       if (!compactRoom.matches) $('message').focus();
       break;
     }
@@ -168,7 +232,7 @@ function onMessage(event) {
         text.classList.add('sticker-message');
         text.setAttribute('aria-label', stickerNames[data.id] || '贴图');
       }
-      article.append(name, text); $('messages').append(article); trimMessages(); break;
+      article.append(name, text); appendMessage(article); break;
     }
     case 'closed':
       resetRoom(data.reason === 'left' ? '已离开房间。' :
@@ -226,6 +290,7 @@ function enter(type) {
 $('account-toggle').addEventListener('click', () => {
   registering = !registering;
   $('account-title').textContent = registering ? '注册账号' : '登录聊天室';
+  $('account-description').textContent = registering ? '用一次性注册码创建同行账号。' : '使用你的同行账号继续。';
   $('account-submit').textContent = registering ? '注册并登录' : '登录';
   $('account-toggle').textContent = registering ? '已有账号，去登录' : '注册账号';
   $('invite-field').hidden = !registering;
@@ -254,9 +319,23 @@ $('message-form').addEventListener('submit', e => {
   e.preventDefault(); const text = $('message').value.trim();
   if (!text) return;
   if (bytes(text) > 2048) { notice('消息太长，请控制在 2048 个 UTF-8 字节以内（约 682 个汉字）。'); return; }
-  if (joined && send({type:'chat', text})) { $('message').value = ''; notice(); $('message').focus(); }
+  if (joined && send({type:'chat', text})) {
+    scrollToLatest();
+    $('message').value = '';
+    draftChanged();
+    showExpressions(false);
+    notice();
+    $('message').focus({preventScroll:true});
+  }
 });
-$('message').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('message-form').requestSubmit(); } });
+$('message').addEventListener('input', draftChanged);
+window.addEventListener('resize', resizeDraft);
+$('message').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!$('send').disabled) $('message-form').requestSubmit();
+  }
+});
 $('leave').addEventListener('click', () => {
   if (!$('close-room').hidden && !confirm('你是房主。离开会关闭房间，所有人都将退出。确认离开？')) return;
   if (send({type:'leave'})) resetRoom('已离开房间。');
@@ -277,22 +356,54 @@ $('rename').addEventListener('click', () => {
   if (!name || bytes(name) > 64) { notice('群名需要 1–64 个 UTF-8 字节。'); return; }
   send({type:'rename', name});
 });
-function expressionButton(label, title, onClick) {
+function showExpressions(open) {
+  $('expression-options').hidden = !open;
+  $('expression-toggle').setAttribute('aria-expanded', String(open));
+  if (open) $('expression-options').scrollTop = 0;
+}
+$('expression-toggle').addEventListener('click', () => {
+  showExpressions($('expression-options').hidden);
+});
+$('message-form').addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('expression-options').hidden) {
+    showExpressions(false);
+    $('expression-toggle').focus({preventScroll:true});
+  }
+});
+function expressionButton(group, label, title, onClick) {
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = label;
   button.setAttribute('aria-label', title);
   button.addEventListener('click', onClick);
-  $('expression-options').append(button);
+  $(group).append(button);
 }
-for (const emoji of ['😀','😂','👍','🙌','❤️','😊'])
-  expressionButton(emoji, '插入 ' + emoji, () => {
+const emojiChoices = [
+  '😀', '😊', '😂', '🤣', '😍', '🥳', '😎', '🤔',
+  '😅', '😭', '😮', '😴', '👍', '👌', '🙌', '👏',
+  '🙏', '👋', '❤️', '💚', '💙', '🔥', '✨', '🎉',
+  '✅', '☕', '🍕', '🐱', '🐶', '🌈'
+];
+for (const emoji of emojiChoices)
+  expressionButton('emoji-options', emoji, '插入 ' + emoji, () => {
     const input = $('message');
-    input.setRangeText(emoji, input.selectionStart, input.selectionEnd, 'end');
-    input.focus();
+    // 表情加在光标处，保留发送前的草稿与输入位置。
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    if (bytes(input.value.slice(0, start) + emoji + input.value.slice(end)) > 2048) {
+      notice('消息已达到 2048 个 UTF-8 字节。');
+      return;
+    }
+    input.setRangeText(emoji, start, end, 'end');
+    draftChanged();
+    if (!compactRoom.matches) input.focus({preventScroll:true});
   });
 for (const [id, emoji] of Object.entries(stickers))
-  expressionButton(emoji, '发送贴图 ' + stickerNames[id], () => {
-    if (joined && send({type:'sticker', id})) $('expressions').open = false;
+  expressionButton('sticker-options', emoji, '发送贴图 ' + stickerNames[id], () => {
+    if (joined && send({type:'sticker', id})) {
+      scrollToLatest();
+      showExpressions(false);
+      $('expression-toggle').focus({preventScroll:true});
+    }
   });
 connect();
