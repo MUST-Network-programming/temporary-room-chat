@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #ifndef WEB_ROOT
-#define WEB_ROOT "第4位"
+#define WEB_ROOT "web"
 #endif
 #define HEADER_LIMIT 8192
 #ifdef _WIN32

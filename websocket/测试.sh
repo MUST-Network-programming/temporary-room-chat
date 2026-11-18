@@ -6,6 +6,6 @@ test_binary=$(mktemp /tmp/chat_ws_test.XXXXXX)
 trap 'rm -f "$test_binary"' EXIT HUP INT TERM
 cc -std=c11 -Wall -Wextra -Wpedantic ${WS_TEST_CFLAGS:-} \
   -Iinclude -Ivendor $(pkg-config --cflags openssl) \
-  第2位/test_websocket.c 第2位/websocket.c vendor/cJSON.c \
+  websocket/test_websocket.c websocket/websocket.c vendor/cJSON.c \
   $(pkg-config --libs openssl) -o "$test_binary"
 "$test_binary"

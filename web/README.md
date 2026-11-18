@@ -1,4 +1,4 @@
-# 第4位：浏览器、静态 HTTP 与连接恢复
+# web：浏览器、静态 HTTP 与连接恢复
 
 ## 文件与职责
 
@@ -12,7 +12,7 @@
 
 在项目根目录执行总 README 的 CMake 构建与启动命令，浏览器打开服务器打印的 HTTP 或 HTTPS 地址。不要直接双击 HTML 文件，WebSocket 需要与服务器同源。
 
-CMake 把源码目录下的 `第4位` 绝对路径编译为 `WEB_ROOT`，所以可从任意工作目录启动。移动项目后应重新运行 CMake 并构建；仅复制二进制不能携带网页。手工编译不指定宏时，默认从当前工作目录的 `第4位` 读取资源，因此要在项目根目录启动。静态文件每次请求重新读取，修改后刷新即可。
+CMake 把源码目录下的 `web` 绝对路径编译为 `WEB_ROOT`，所以可从任意工作目录启动。移动项目后应重新运行 CMake 并构建；仅复制二进制不能携带网页。手工编译不指定宏时，默认从当前工作目录的 `web` 读取资源，因此要在项目根目录启动。静态文件每次请求重新读取，修改后刷新即可。
 
 ## 消息与状态
 
@@ -37,12 +37,12 @@ TCP 的一次读取不等于完整请求。`http_process` 在输入缓冲里寻�
 2026-11-04，macOS 本机执行：
 
 ```sh
-node --check 第4位/app.js
+node --check web/app.js
 cc -std=c11 -Wall -Wextra -Wpedantic -fsyntax-only \
-  -Iinclude -Ivendor -I/opt/homebrew/opt/openssl@3/include 第4位/http.c
+  -Iinclude -Ivendor -I/opt/homebrew/opt/openssl@3/include web/http.c
 cc -std=c11 -Wall -Wextra -Wpedantic \
   -Iinclude -Ivendor -I/opt/homebrew/opt/openssl@3/include \
-  第4位/http.c 第4位/test_http.c -o /tmp/chat_test_http
+  web/http.c web/test_http.c -o /tmp/chat_test_http
 /tmp/chat_test_http
 ```
 

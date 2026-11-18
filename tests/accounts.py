@@ -8,7 +8,7 @@ import tempfile
 from integration import Peer, ROOT
 
 BINARY = ROOT / 'build/chat_server'
-CERTS = ROOT / '第5位/certs'
+CERTS = ROOT / 'tls/certs'
 PORT = 18767
 PASSWORD = 'demo-passphrase-2026'
 

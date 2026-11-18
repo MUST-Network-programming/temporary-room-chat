@@ -20,11 +20,11 @@ cmake --build build
 浏览器打开 http://localhost:8080 。打开两个窗口，创建房间后复制房间码到另一个窗口加入。按 Ctrl+C 停止服务器。
 
 ```sh
-python3 第5位/make_certs.py
-./build/chat_server --port 8443 --cert 第5位/certs/server.crt --key 第5位/certs/server.key
+python3 tls/make_certs.py
+./build/chat_server --port 8443 --cert tls/certs/server.crt --key tls/certs/server.key
 ```
 
-先按 [[第5位/模块说明与演示]] 配置信任，再打开 https://localhost:8443 。证书生成脚本拒绝覆盖已有 CA。项目内已生成的证书用于当前本机测试，分发源码时排除 certs 文件夹并在演示机器重新生成。
+先按 [[tls/模块说明与演示]] 配置信任，再打开 https://localhost:8443 。证书生成脚本拒绝覆盖已有 CA。项目内已生成的证书用于当前本机测试，分发源码时排除 certs 文件夹并在演示机器重新生成。
 
 ## Windows 原生构建
 
@@ -42,25 +42,25 @@ $env:PATH = 'C:\vcpkg\installed\x64-windows\bin;C:\vcpkg\installed\x64-windows\t
 .\build-win\Release\chat_server.exe --anonymous-loopback --port 8080
 ```
 
-打开 http://localhost:8080 。TLS 模式先在同一终端执行 `python 第5位/make_certs.py`，然后带 `--cert` 和 `--key` 参数启动。上述步骤已按原生工具链准备，当前 Windows 运行和浏览器互测待组员实测。
+打开 http://localhost:8080 。TLS 模式先在同一终端执行 `python tls/make_certs.py`，然后带 `--cert` 和 `--key` 参数启动。上述步骤已按原生工具链准备，当前 Windows 运行和浏览器互测待组员实测。
 
 ## 局域网两台电脑互测
 
 两台机器连接同一网络。正式跨设备联调使用 HTTPS 账号模式。按下面「账号注册与发码」启动服务，另一台通过 `https://服务端局域网IP:8443` 登录。Windows 若提示防火墙访问，允许当前私人网络的入站连接。交换服务端与客户端角色，再重复测试。HTTP 匿名模式用于本机协议演示。
 
-TLS 跨机器演示须在生成证书时加入实际服务端 IP，例如 `python3 第5位/make_certs.py --ip 192.168.1.20`。在两端信任同一个演示 CA 后访问 `https://192.168.1.20:8443`。CA 私钥与服务端私钥只留在服务端。
+TLS 跨机器演示须在生成证书时加入实际服务端 IP，例如 `python3 tls/make_certs.py --ip 192.168.1.20`。在两端信任同一个演示 CA 后访问 `https://192.168.1.20:8443`。CA 私钥与服务端私钥只留在服务端。
 
 ## 自动验收
 
 ```sh
 python3 tests/integration.py
-python3 tests/integration.py build/chat_server 第5位/certs
+python3 tests/integration.py build/chat_server tls/certs
 ctest --test-dir build --output-on-failure
 python3 tests/expiry_load.py
-python3 tests/expiry_load.py build/chat_server 第5位/certs
+python3 tests/expiry_load.py build/chat_server tls/certs
 ```
 
-Windows 可执行 `python tests/integration.py build-win/Release/chat_server.exe`，TLS 测试末尾添加 `第5位/certs`。
+Windows 可执行 `python tests/integration.py build-win/Release/chat_server.exe`，TLS 测试末尾添加 `tls/certs`。
 
 [[docs/验收记录]] 记录实际运行结果，[[docs/协议与答辩]] 说明协议和总体设计。每位成员的模块说明包含三分钟演示流程。
 
@@ -77,7 +77,7 @@ Windows 可执行 `python tests/integration.py build-win/Release/chat_server.exe
 启动时加 `--log-chat`，服务端终端会显示建房、入房、恢复连接、离房、断线、改名、关房以及聊天正文和贴图编号。每行包含时间戳和房间码，适用的事件会带昵称。默认关闭。日志通过标准错误输出，可由拥有该终端或日志访问权限的人员查看。答辩使用测试消息。
 
 ```sh
-./build/chat_server --bind 172.20.10.5 --port 8443 --cert 第5位/certs/server.crt --key 第5位/certs/server.key --log-chat
+./build/chat_server --bind 172.20.10.5 --port 8443 --cert tls/certs/server.crt --key tls/certs/server.key --log-chat
 ```
 
 将绑定地址替换为实际网卡 IP，使用匹配该地址的证书。
@@ -93,7 +93,7 @@ Windows 可执行 `python tests/integration.py build-win/Release/chat_server.exe
 启动时使用同一数据库和匹配地址的证书。下面使用热点 IP，请按现场网卡地址调整。
 
 ```sh
-./build/chat_server --bind 172.20.10.5 --port 8444 --accounts accounts.sqlite3 --cert 第5位/certs/server.crt --key 第5位/certs/server.key
+./build/chat_server --bind 172.20.10.5 --port 8444 --accounts accounts.sqlite3 --cert tls/certs/server.crt --key tls/certs/server.key
 ```
 
 浏览器信任项目 CA 后打开服务地址，选择「注册账号」，输入 3–24 位小写字母、数字或下划线组成的用户名和至少 8 个字节的密码，粘贴注册码后提交。注册成功即登录，之后用账号密码登录。用户名同时作为房间昵称。同一账号重入同一个房间时接管旧连接并保留房主角色。
