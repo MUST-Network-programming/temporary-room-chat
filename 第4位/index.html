@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#214c43"><title>同行 · 临时聊天室</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header class="topbar"><a class="brand" href="/">同行<span>临时聊天室</span></a><span id="status" class="connection" role="status">正在连接…</span></header>
+<main>
+<section id="lobby" class="lobby" hidden aria-labelledby="welcome"><div class="intro"><h1 id="welcome">这一程，<br>保持联系。</h1><p>为短途旅行和临时活动留一个集合的地方。创建房间，把加入码分享给同行的人。</p><p class="privacy">房间到期自动关闭，聊天记录不写入服务器磁盘。</p></div>
+<form id="entry-form" class="entry"><h2>开始同行</h2><div id="nickname-field"><label for="nickname">你的昵称</label><input id="nickname" name="nickname" autocomplete="nickname" maxlength="48" placeholder="让同行的人认出你"></div><p id="signed-in" hidden></p><button id="logout" class="secondary" type="button" hidden>退出登录</button><label for="room-code">房间加入码 <span>加入已有房间时填写</span></label><input id="room-code" name="room" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="6 位加入码"><label for="recent" id="recent-label" hidden>最近房间</label><select id="recent" hidden><option value="">选择最近房间</option></select><button id="join" type="submit" disabled>加入房间</button><div class="divider">或</div><button id="create" class="secondary" type="button" disabled>创建新房间</button></form></section>
+<section id="room-view" class="room-view" hidden aria-label="聊天室"><aside class="room-sidebar"><div><div class="room-sidebar-heading"><h1 id="room-name">同行房间</h1><button id="leave" class="secondary" type="button">离开房间</button></div><p class="small-label">分享加入码</p><strong id="room-id" class="room-id"></strong><button id="copy-code" class="text-button" type="button">复制加入码</button><p id="expiry" class="muted"></p></div><div class="members-block"><h2>在线同行 <span id="member-count">0</span></h2><ul id="members"></ul></div><div class="room-actions"><button id="rename" class="secondary" type="button" hidden>更改群名</button><button id="close-room" class="danger" type="button" hidden>关闭房间</button></div></aside><div class="conversation"><div class="conversation-heading"><h2>一路聊聊</h2><p id="identity"></p></div><div id="messages" role="log" aria-live="polite" aria-relevant="additions"><p id="empty" class="empty">还没有消息。<br><span>和同行的人打个招呼吧。</span></p></div><form id="message-form" class="composer"><label class="sr-only" for="message">消息内容</label><textarea id="message" rows="2" maxlength="2048" placeholder="写点什么…" required></textarea><details id="expressions"><summary>表情与贴图</summary><div id="expression-options"></div></details><div class="composer-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button id="send" type="submit" disabled>发送消息</button></div></form></div></section>
+<section id="account-panel" class="entry account-panel" hidden>
+<form id="account-form">
+<h2 id="account-title">登录聊天室</h2>
+<label for="account-name">用户名</label>
+<input id="account-name" autocomplete="username" required minlength="3" maxlength="24" pattern="[a-z0-9_]+" autocapitalize="none">
+<label for="account-password">密码</label>
+<input id="account-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+<div id="invite-field" hidden>
+<label for="invite-code">一次性注册码</label>
+<input id="invite-code" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
+</div>
+<button id="account-submit" type="submit" disabled>登录</button>
+<button id="account-toggle" class="secondary" type="button">注册账号</button>
+</form>
+</section>
+<p id="notice" class="notice" role="status" aria-live="polite"></p>
+</main><footer>临时相聚，好好同行。<span id="transport"></span></footer>
+</body></html>

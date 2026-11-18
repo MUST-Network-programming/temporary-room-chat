@@ -1,0 +1,9 @@
+build*/
+第5位/certs/
+__pycache__/
+.DS_Store
+
+accounts.sqlite3*
+
+*.zip
+/项目提示词.md
