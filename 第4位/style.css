@@ -7,15 +7,69 @@
 #expression-options button { padding: .45rem .65rem; font-size: 1.1rem; }
 .chat-message .sticker-message { display: inline-grid; place-items: center; min-width: 4rem; min-height: 4rem; font-size: 2.6rem; border-radius: 1rem; background: #e5eee3; }
 
-.room-sidebar-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .6rem;
-  margin-bottom: .75rem;
-}
-.room-sidebar-heading h1 { min-width: 0; margin: .35rem 0 0; }
-#leave { flex: none; padding: .55rem .65rem; font-size: .8rem; }
 .account-panel { max-width: 420px; margin: 0 auto 1rem; }
 #signed-in { overflow-wrap: anywhere; }
 #logout { width: auto; padding: .45rem .7rem; margin: 0 0 .5rem; }
+
+.room-view {
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "sidebar heading" "sidebar conversation";
+  height: clamp(480px, 74dvh, 790px);
+  min-height: 0;
+}
+.room-sidebar {
+  grid-area: sidebar;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  gap: 18px;
+}
+.conversation-heading { grid-area: heading; padding: 16px 22px; min-width: 0; }
+.conversation-title { min-width: 0; }
+.conversation-title h1 { font-size: 19px; line-height: 1.35; margin: 0 0 5px; }
+.conversation-actions { display: flex; align-items: center; flex: none; gap: 8px; }
+.conversation-actions button { padding: .55rem .65rem; min-height: 44px; font-size: .8rem; }
+#room-info { display: none; }
+.conversation { grid-area: conversation; min-height: 0; }
+#messages { height: auto; min-height: 0; flex: 1 1 0; }
+.members-block { flex: none; }
+.room-sidebar h2 { margin: 0 0 8px; font-size: 14px; }
+.members-block ul, .room-recent ul { margin: 0; padding: 0; list-style: none; }
+.room-recent li { font-size: 13px; line-height: 1.5; padding: .4rem .5rem; overflow-wrap: anywhere; }
+.room-recent li[aria-current="true"] { background: var(--accent); border-radius: .45rem; }
+.room-settings { padding-top: 12px; border-top: 1px solid var(--line); }
+.room-settings summary, #expressions summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.room-settings-body { margin-top: 12px; }
+.room-notice { margin: 0; padding: .55rem 1rem; color: var(--danger); background: #fbf2ee; overflow-wrap: anywhere; font-size: 13px; }
+.composer { flex: none; background: var(--white); }
+.composer-bottom { margin-top: .25rem; }
+.composer-bottom .composer-hint { margin-left: auto; }
+#expressions { position: relative; }
+#expressions summary { display: flex; align-items: center; min-height: 44px; padding: 0 .6rem; margin: 0; border: 1px solid var(--line); border-radius: .5rem; }
+#expressions[open] #expression-options { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 1; width: min(240px, 70vw); padding: .6rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--white); box-shadow: 0 6px 16px #203b3520; }
+#expression-options button { min-width: 44px; min-height: 44px; background: #eef0e9; color: var(--ink); }
+#expression-options button:hover { background: var(--accent); }
+
+@media (max-width: 680px) {
+  .room-view {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "heading" "sidebar" "conversation";
+    height: max(390px, calc(100dvh - 120px));
+  }
+  .conversation-heading { gap: .6rem; padding: .65rem .75rem; }
+  .conversation-title h1 { font-size: 16px; }
+  .conversation-actions { gap: 4px; }
+  .conversation-actions button { padding-inline: .5rem; }
+  #room-info { display: inline-block; }
+  .room-sidebar { display: none; max-height: 34dvh; padding: 12px 16px; }
+  .room-sidebar.expanded { display: flex; }
+  .room-recent { display: none; }
+  .room-sidebar .small-label { display: block; }
+  .room-actions { flex-wrap: wrap; }
+  .composer { padding: .6rem .75rem; }
+  .composer textarea { font-size: 16px; }
+  .composer-bottom .composer-hint { display: none; }
+  #send { min-height: 44px; }
+}

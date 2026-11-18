@@ -14,6 +14,13 @@ function renderRecent() {
   select.replaceChildren(new Option('选择最近房间', ''));
   for (const item of recent) select.add(new Option(item.name + ' · ' + item.room, item.room));
   select.hidden = $('recent-label').hidden = !recent.length;
+  $('room-recent').hidden = !recent.length;
+  $('room-recent-list').replaceChildren(...recent.map(item => {
+    const entry = document.createElement('li');
+    entry.textContent = item.name + ' · ' + item.room;
+    if (item.room === session?.room) entry.setAttribute('aria-current', 'true');
+    return entry;
+  }));
 }
 function setRoomName(name) {
   $('room-name').textContent = name;
@@ -54,7 +61,21 @@ const bytes = value => new TextEncoder().encode(value).length;
 function persist() {
   try { session ? sessionStorage.setItem(storageKey, JSON.stringify(session)) : sessionStorage.removeItem(storageKey); } catch (_) { /* 隐私模式下不保证刷新恢复。 */ }
 }
-function notice(text = '') { $('notice').textContent = text; }
+function notice(text = '') {
+  const inRoom = !$('room-view').hidden;
+  $('notice').textContent = inRoom ? '' : text;
+  $('room-notice').textContent = inRoom ? text : '';
+  $('room-notice').hidden = !inRoom || !text;
+}
+const compactRoom = matchMedia('(max-width: 680px)');
+function showRoomInfo(expanded) {
+  $('room-info').setAttribute('aria-expanded', String(expanded));
+  $('room-sidebar').classList.toggle('expanded', expanded);
+}
+$('room-info').addEventListener('click', () => {
+  const expanded = $('room-info').getAttribute('aria-expanded') === 'true';
+  showRoomInfo(!expanded);
+});
 function controls() {
   const online = socket && socket.readyState === WebSocket.OPEN;
   const allowed = authRequired === false || Boolean(account);
@@ -78,6 +99,7 @@ function send(data) {
 function resetRoom(message) {
   session = null; joined = false; pending = false; restoring = false; persist();
   $('room-view').hidden = true; showLobby();
+  showRoomInfo(false); $('room-settings').open = false;
   $('close-room').hidden = true; $('members').replaceChildren();
   $('member-count').textContent = '0';
   notice(message); controls();
@@ -124,7 +146,9 @@ function onMessage(event) {
       setRoomName(data.name || '同行房间');
       $('messages').replaceChildren();
       systemMessage(wasRestoring ? '已恢复连接，以下是房间保留的最近消息。' : '已加入房间。');
-      notice(); controls(); $('message').focus(); break;
+      notice(); controls();
+      if (!compactRoom.matches) $('message').focus();
+      break;
     }
     case 'members':
       $('members').replaceChildren();
@@ -146,7 +170,10 @@ function onMessage(event) {
       }
       article.append(name, text); $('messages').append(article); trimMessages(); break;
     }
-    case 'closed': resetRoom(`房间已关闭：${data.reason || '本次同行已结束'}。你可以创建或加入其他房间。`); break;
+    case 'closed':
+      resetRoom(data.reason === 'left' ? '已离开房间。' :
+        data.reason === 'expired' ? '房间已到期。' : '房间已关闭。');
+      break;
     case 'error':
       // 恢复失败不循环提交无效令牌；让用户明确选择新的房间。
       if (data.code === 'login_expired' || data.code === 'login_required') {
