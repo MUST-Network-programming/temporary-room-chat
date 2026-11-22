@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <openssl/crypto.h>
 
 #define ROOM_LIMIT 16
 #define SESSION_LIMIT 256
@@ -12,7 +14,7 @@
 #define HISTORY_LIMIT 100
 typedef struct {
     int used;
-    char code[7], name[65];
+    char code[7], name[65], instance[65];
     time_t expires;
     cJSON *history[HISTORY_LIMIT];
     unsigned next_message, message_count;
@@ -142,6 +144,7 @@ static int schema(cJSON *j, const char *type) {
         if ((!strcmp(type, "login") || !strcmp(type, "register")) &&
             (!strcmp(v->string, "name") || !strcmp(v->string, "password"))) continue;
         if (!strcmp(type, "register") && !strcmp(v->string, "invite")) continue;
+        if (!strcmp(type, "assistant_rpc") && (!strcmp(v->string,"secret") || !strcmp(v->string,"token") || !strcmp(v->string,"text"))) continue;
         if (!strcmp(type, "authenticate") && !strcmp(v->string, "token")) continue;
         if ((!strcmp(type, "create") || !strcmp(type, "join")) && !strcmp(v->string, "nickname")) continue;
         if (!strcmp(type, "join") && (!strcmp(v->string, "room") || !strcmp(v->string, "token"))) continue;
@@ -181,6 +184,7 @@ static void joined(Client *c, int i) {
     cJSON_AddStringToObject(j, "room", r->code);
     cJSON_AddStringToObject(j, "nickname", m->nickname);
     if (!accounts_active()) cJSON_AddStringToObject(j, "token", m->token);
+    cJSON_AddStringToObject(j, "assistant_token", m->token);
     cJSON_AddBoolToObject(j, "owner", m->owner);
     cJSON_AddNumberToObject(j, "expires", (double)r->expires);
     cJSON_AddStringToObject(j, "name", r->name);
@@ -234,9 +238,9 @@ static void enter(Client *c, cJSON *j, int create) {
         if (duplicate) { send_error(c,"nickname_taken","昵称已被使用"); return; }
         if (count >= ROOM_MEMBERS || free_member < 0) { send_error(c,"capacity","房间或会话已满"); return; }
     }
-    char token[65], code[7];
-    if (!random_token(token) || (create && !random_code(code))) { send_error(c,"random_failed","安全随机数生成失败"); return; }
-    if (create) { rooms[r].used = 1; strcpy(rooms[r].code,code); strcpy(rooms[r].name, "同行房间"); rooms[r].expires = time(NULL) + room_ttl; }
+    char token[65], code[7], instance[65];
+    if (!random_token(token) || (create && (!random_code(code) || !random_token(instance)))) { send_error(c,"random_failed","安全随机数生成失败"); return; }
+    if (create) { rooms[r].used = 1; strcpy(rooms[r].instance,instance); strcpy(rooms[r].code,code); strcpy(rooms[r].name, "同行房间"); rooms[r].expires = time(NULL) + room_ttl; }
     Member *m = &members[free_member];
     m->used = 1; m->room = r; m->owner = create; m->connection = c;
     strcpy(m->nickname,nickname); strcpy(m->token,token); c->member = free_member;
@@ -262,6 +266,38 @@ static int valid_sticker(const char *id) {
     return id && (!strcmp(id, "wave") || !strcmp(id, "ok") ||
                   !strcmp(id, "party") || !strcmp(id, "heart"));
 }
+/* Worker-only RPC. Secret is supplied from the environment, never from a browser.
+   Every call resolves the original room membership token against live C state. */
+static void assistant_rpc(Client *c, cJSON *j) {
+    const char *secret = getenv("ASSISTANT_SHARED_SECRET");
+    const char *given = string_field(j, "secret"), *token = string_field(j, "token");
+    if (!secret || strlen(secret)<32 || !given || strlen(given)!=strlen(secret) ||
+        CRYPTO_memcmp(secret,given,strlen(secret)) || !token) {
+        send_error(c,"forbidden","助手后台未授权"); return;
+    }
+    int i=-1;
+    for (int k=0;k<SESSION_LIMIT;k++)
+        if (members[k].used && strlen(token)==64 && !CRYPTO_memcmp(token,members[k].token,64)) { i=k; break; }
+    if (i<0) { send_error(c,"not_joined","房间成员会话已失效"); return; }
+    Member *m=&members[i]; Room *r=&rooms[m->room];
+    const char *body=string_field(j,"text");
+    if (body) {
+        if (!m->owner || !valid_string(body,2048,0)) { send_error(c,"forbidden","只有房主可以发布有效行程"); return; }
+        Member assistant=*m; strcpy(assistant.nickname,"行程助手");
+        publish_message(&assistant,"chat","text",body);
+    }
+    cJSON *out=event("assistant_context");
+    cJSON_AddStringToObject(out,"room",r->code);
+    cJSON_AddStringToObject(out,"instance",r->instance);
+    cJSON_AddStringToObject(out,"nickname",m->nickname);
+    cJSON_AddBoolToObject(out,"owner",m->owner);
+    cJSON_AddNumberToObject(out,"expires",(double)r->expires);
+    cJSON *history=cJSON_AddArrayToObject(out,"history");
+    unsigned start=(r->next_message+HISTORY_LIMIT-r->message_count)%HISTORY_LIMIT;
+    for (unsigned k=0;k<r->message_count;k++)
+        cJSON_AddItemToArray(history,cJSON_Duplicate(r->history[(start+k)%HISTORY_LIMIT],1));
+    send_json(c,out);
+}
 void room_message(Client *c, const char *text, size_t len) {
     room_tick(time(NULL));
     if (!raw_valid(text,len)) { send_error(c,"invalid_json","消息为空、过长或含 NUL"); return; }
@@ -272,7 +308,8 @@ void room_message(Client *c, const char *text, size_t len) {
     if (!j || end != text + len || !type || !schema(j,type)) {
         cJSON_Delete(j); send_error(c,"invalid_json","JSON 格式、字段类型或重复字段错误"); return;
     }
-    if (!strcmp(type, "auth_mode")) {
+    if (!strcmp(type, "assistant_rpc")) { assistant_rpc(c,j);
+    } else if (!strcmp(type, "auth_mode")) {
         cJSON *mode = event("auth_mode");
         cJSON_AddBoolToObject(mode, "required", accounts_active());
         send_json(c, mode);

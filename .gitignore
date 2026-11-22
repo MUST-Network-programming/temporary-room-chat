@@ -7,3 +7,10 @@ accounts.sqlite3*
 
 *.zip
 /项目提示词.md
+
+# v2 local task state and dependencies
+.local-v2/
+.venv/
+.env
+*.eml
+__pycache__/
