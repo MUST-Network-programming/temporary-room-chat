@@ -1,0 +1,29 @@
+# 仅示意，不会自动应用。需替换域名/IP和证书路径。
+# C 账户模式本身启用 TLS；gateway 的 CHAT_INTERNAL_WS 指向经验证的内部 WSS。
+# 8090 gateway 同源转发 WS 到 C，API/worker 分离，不把 SMTP 收件箱公开。
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+server {
+    listen 443 ssl;
+    server_name YOUR_DOMAIN_OR_IP;
+    ssl_certificate /etc/ssl/YOUR_CERT_CHAIN.pem;
+    ssl_certificate_key /etc/ssl/private/YOUR_KEY.pem;
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 90s;
+    }
+    location = /ws {
+        proxy_pass http://127.0.0.1:8090/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 120s;
+    }
+}

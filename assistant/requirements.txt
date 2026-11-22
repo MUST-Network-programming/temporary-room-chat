@@ -1,0 +1,2 @@
+aiohttp>=3.10,<4
+aiosmtpd>=1.4.6,<2
