@@ -34,7 +34,9 @@ function client() {
     }
   };
   w.confirm = () => true;
-  w.prompt = () => "周末灵感室";
+  w.prompt = () => {
+    throw new Error("rename must use the in-page form, not prompt");
+  };
   w.eval(js);
   return dom;
 }
@@ -63,11 +65,34 @@ async function main() {
     const room = get(a, "room-id").textContent;
     assert.match(room, /^[A-Z0-9]{6}$/);
     assert.equal(get(a, "room-recent-list").children.length, 1);
+    assert.equal(get(a, "room-name").textContent, "同行房间");
     click(a, "rename");
+    assert.equal(get(a, "rename-form").hidden, false);
+    assert.equal(get(a, "rename-input").value, "同行房间");
+    get(a, "rename-input").value = "   ";
+    get(a, "rename-form").dispatchEvent(
+      new a.window.Event("submit", { cancelable: true, bubbles: true }),
+    );
+    assert.equal(get(a, "room-name").textContent, "同行房间");
+    assert.equal(get(a, "rename-form").hidden, false);
+    assert.equal(
+      get(a, "room-notice").textContent,
+      "群名需要 1–64 个 UTF-8 字节。",
+    );
+    click(a, "rename-cancel");
+    assert.equal(get(a, "rename-form").hidden, true);
+    assert.equal(get(a, "room-name").textContent, "同行房间");
+    click(a, "rename");
+    assert.equal(get(a, "rename-input").value, "同行房间");
+    get(a, "rename-input").value = "周末灵感室";
+    get(a, "rename-form").dispatchEvent(
+      new a.window.Event("submit", { cancelable: true, bubbles: true }),
+    );
     await until(
       () => get(a, "room-name").textContent === "周末灵感室",
       "rename",
     );
+    assert.equal(get(a, "rename-form").hidden, true);
     get(b, "nickname").value = "小雨";
     get(b, "room-code").value = room;
     get(b, "entry-form").dispatchEvent(
@@ -79,6 +104,7 @@ async function main() {
         !get(b, "room-view").hidden,
       "join",
     );
+    assert.equal(get(b, "room-name").textContent, "周末灵感室");
     assert.equal(get(a, "members").children.length, 2);
     assert.equal(
       get(a, "members").querySelector(".member-self").textContent,
@@ -138,7 +164,7 @@ async function main() {
     await until(() => !get(a, "lobby").hidden, "close");
     assert.equal(errors.length, 0, errors.map((e) => e.message).join("\n"));
     console.log(
-      "PASS DOM + real WS: lobby/create/rename/join/members/send/XSS-text/sticker/reconnect-replay/themes/info/leave/recent-search/close, no runtime errors",
+      "PASS DOM + real WS: lobby/create/in-page rename (blank rejected, cancel keeps name, save broadcasts)/join/members/send/XSS-text/sticker/reconnect-replay/themes/info/leave/recent-search/close, no runtime errors",
     );
   } finally {
     for (const socket of sockets) {
