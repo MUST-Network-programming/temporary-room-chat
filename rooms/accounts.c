@@ -145,6 +145,10 @@ static void authenticated(Client *client, Login *login) {
     cJSON_AddStringToObject(reply, "token", login->token);
     send_json(client, reply);
 }
+const char *accounts_identity(const char *token) {
+    Login *login = accounts_active() && token ? find_login(token) : NULL;
+    return login ? login->name : NULL;
+}
 static void issue_login(Client *client, const char *name) {
     Login *available = &logins[0];
     for (int i = 1; i < LOGIN_LIMIT; ++i)

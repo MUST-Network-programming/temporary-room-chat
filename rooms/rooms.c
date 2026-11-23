@@ -12,20 +12,57 @@
 #define ROOM_MEMBERS 64
 
 #define HISTORY_LIMIT 100
+#define BOT_NAME "群聊助手"
+#define BOT_PENDING_LIMIT 4
+#define BOT_CONTEXT_LIMIT 20
+#define NOTICE_LIMIT 64
+typedef struct {
+    char id[65], asker[65];
+    time_t deadline;
+} BotRequest;
+typedef struct {
+    char id[33];
+    unsigned revision;
+} NoticeCard;
 typedef struct {
     int used;
     char code[7], name[65], instance[65];
     time_t expires;
     cJSON *history[HISTORY_LIMIT];
     unsigned next_message, message_count;
+    BotRequest bot_requests[BOT_PENDING_LIMIT];
+    NoticeCard notices[NOTICE_LIMIT];
 } Room;
 typedef struct {
     int used, room, owner;
     char nickname[49], token[65];
     Client *connection;
+    time_t next_bot_request;
 } Member;
 static Room rooms[ROOM_LIMIT];
 static Member members[SESSION_LIMIT];
+static Client *bot_worker;
+
+static void bot_error(int r, const char *asker, const char *message) {
+    for (int i = 0; i < SESSION_LIMIT; ++i)
+        if (members[i].used && members[i].room == r && members[i].connection &&
+            !strcmp(members[i].token, asker)) {
+            send_error(members[i].connection, "bot_unavailable", message);
+            return;
+        }
+}
+
+static void clear_bot_requests(void) {
+    for (int r = 0; r < ROOM_LIMIT; ++r) {
+        if (!rooms[r].used) continue;
+        for (int k = 0; k < BOT_PENDING_LIMIT; ++k) {
+            BotRequest *request = &rooms[r].bot_requests[k];
+            if (!request->deadline) continue;
+            bot_error(r, request->asker, "群聊助手连接中断，请稍后重试");
+            memset(request, 0, sizeof *request);
+        }
+    }
+}
 
 /* 会话与 TCP 连接分开保存：断网只清空 connection，令牌仍可恢复身份。 */
 static int member_of(Client *c) {
@@ -84,10 +121,22 @@ static void close_room(int r, const char *reason) {
     memset(&rooms[r], 0, sizeof rooms[r]);
 }
 void room_tick(time_t now) {
-    for (int r = 0; r < ROOM_LIMIT; ++r)
-        if (rooms[r].used && now >= rooms[r].expires) close_room(r, "expired");
+    for (int r = 0; r < ROOM_LIMIT; ++r) {
+        if (!rooms[r].used) continue;
+        if (now >= rooms[r].expires) { close_room(r, "expired"); continue; }
+        for (int k = 0; k < BOT_PENDING_LIMIT; ++k) {
+            BotRequest *request = &rooms[r].bot_requests[k];
+            if (!request->deadline || now < request->deadline) continue;
+            bot_error(r, request->asker, "群聊助手响应超时，请稍后重试");
+            memset(request, 0, sizeof *request);
+        }
+    }
 }
 void room_disconnect(Client *c) {
+    if (bot_worker == c) {
+        bot_worker = NULL;
+        clear_bot_requests();
+    }
     int i = member_of(c);
     c->member = -1;
     if (i < 0) return;
@@ -145,6 +194,17 @@ static int schema(cJSON *j, const char *type) {
             (!strcmp(v->string, "name") || !strcmp(v->string, "password"))) continue;
         if (!strcmp(type, "register") && !strcmp(v->string, "invite")) continue;
         if (!strcmp(type, "assistant_rpc") && (!strcmp(v->string,"secret") || !strcmp(v->string,"token") || !strcmp(v->string,"text"))) continue;
+        if (!strcmp(type, "bot_watch") && !strcmp(v->string, "secret")) continue;
+        if (!strcmp(type, "bot_reply") && (!strcmp(v->string, "instance") ||
+            !strcmp(v->string, "id") || !strcmp(v->string, "text"))) continue;
+        if ((!strcmp(type, "account_identity") || !strcmp(type, "notice_room")) &&
+            (!strcmp(v->string, "secret") || !strcmp(v->string, "login"))) continue;
+        if (!strcmp(type, "notice_room") && !strcmp(v->string, "token")) continue;
+        if (!strcmp(type, "notice_card") && (!strcmp(v->string, "secret") ||
+            !strcmp(v->string, "instance") || !strcmp(v->string, "id") ||
+            !strcmp(v->string, "title") || !strcmp(v->string, "text") ||
+            !strcmp(v->string, "due") || !strcmp(v->string, "revision") ||
+            !strcmp(v->string, "status"))) continue;
         if (!strcmp(type, "authenticate") && !strcmp(v->string, "token")) continue;
         if ((!strcmp(type, "create") || !strcmp(type, "join")) && !strcmp(v->string, "nickname")) continue;
         if (!strcmp(type, "join") && (!strcmp(v->string, "room") || !strcmp(v->string, "token"))) continue;
@@ -203,6 +263,7 @@ static void enter(Client *c, cJSON *j, int create) {
     }
     const char *nickname = account_mode ? c->account : string_field(j, "nickname");
     if (!nickname || !valid_string(nickname, 48, 1)) { send_error(c,"invalid_nickname","昵称需要 1–48 个 UTF-8 字节"); return; }
+    if (!strcmp(nickname, BOT_NAME)) { send_error(c,"invalid_nickname","此昵称保留给群聊助手"); return; }
     if (member_of(c) >= 0) { send_error(c,"already_joined","请先离开当前房间"); return; }
     int r = -1, free_member = -1;
     for (int i = 0; i < SESSION_LIMIT; ++i) if (!members[i].used) { free_member = i; break; }
@@ -247,12 +308,8 @@ static void enter(Client *c, cJSON *j, int create) {
     log_room_event(&rooms[r], create ? "create" : "join", nickname, NULL, NULL);
     joined(c,free_member);
 }
-static void publish_message(Member *member, const char *type, const char *field, const char *value) {
-    Room *room = &rooms[member->room];
-    log_room_event(room, type, member->nickname, field, value);
-    cJSON *out = event(type);
-    cJSON_AddStringToObject(out, "nickname", member->nickname);
-    cJSON_AddStringToObject(out, field, value);
+static void publish_event(int r, cJSON *out) {
+    Room *room = &rooms[r];
     cJSON *saved = cJSON_Duplicate(out, 1);
     if (saved) {
         cJSON_Delete(room->history[room->next_message]);
@@ -260,7 +317,14 @@ static void publish_message(Member *member, const char *type, const char *field,
         room->next_message = (room->next_message + 1) % HISTORY_LIMIT;
         if (room->message_count < HISTORY_LIMIT) ++room->message_count;
     }
-    broadcast(member->room, out);
+    broadcast(r, out);
+}
+static void publish_message(Member *member, const char *type, const char *field, const char *value) {
+    log_room_event(&rooms[member->room], type, member->nickname, field, value);
+    cJSON *out = event(type);
+    cJSON_AddStringToObject(out, "nickname", member->nickname);
+    cJSON_AddStringToObject(out, field, value);
+    publish_event(member->room, out);
 }
 static int valid_sticker(const char *id) {
     return id && (!strcmp(id, "wave") || !strcmp(id, "ok") ||
@@ -268,18 +332,31 @@ static int valid_sticker(const char *id) {
 }
 /* Worker-only RPC. Secret is supplied from the environment, never from a browser.
    Every call resolves the original room membership token against live C state. */
-static void assistant_rpc(Client *c, cJSON *j) {
+static int internal_authorized(cJSON *j) {
     const char *secret = getenv("ASSISTANT_SHARED_SECRET");
-    const char *given = string_field(j, "secret"), *token = string_field(j, "token");
-    if (!secret || strlen(secret)<32 || !given || strlen(given)!=strlen(secret) ||
-        CRYPTO_memcmp(secret,given,strlen(secret)) || !token) {
+    const char *given = string_field(j, "secret");
+    return secret && strlen(secret) >= 32 && given && strlen(given) == strlen(secret) &&
+           !CRYPTO_memcmp(secret, given, strlen(secret));
+}
+static Member *member_from_token(const char *token) {
+    if (!token || strlen(token) != 64) return NULL;
+    for (int i = 0; i < SESSION_LIMIT; ++i)
+        if (members[i].used && !CRYPTO_memcmp(token, members[i].token, 64)) return &members[i];
+    return NULL;
+}
+static int room_from_instance(const char *instance) {
+    if (!instance) return -1;
+    for (int r = 0; r < ROOM_LIMIT; ++r)
+        if (rooms[r].used && !strcmp(rooms[r].instance, instance)) return r;
+    return -1;
+}
+static void assistant_rpc(Client *c, cJSON *j) {
+    if (!internal_authorized(j) || !string_field(j, "token")) {
         send_error(c,"forbidden","助手后台未授权"); return;
     }
-    int i=-1;
-    for (int k=0;k<SESSION_LIMIT;k++)
-        if (members[k].used && strlen(token)==64 && !CRYPTO_memcmp(token,members[k].token,64)) { i=k; break; }
-    if (i<0) { send_error(c,"not_joined","房间成员会话已失效"); return; }
-    Member *m=&members[i]; Room *r=&rooms[m->room];
+    Member *m = member_from_token(string_field(j, "token"));
+    if (!m) { send_error(c,"not_joined","房间成员会话已失效"); return; }
+    Room *r=&rooms[m->room];
     const char *body=string_field(j,"text");
     if (body) {
         if (!m->owner || !valid_string(body,2048,0)) { send_error(c,"forbidden","只有房主可以发布有效行程"); return; }
@@ -294,9 +371,153 @@ static void assistant_rpc(Client *c, cJSON *j) {
     cJSON_AddNumberToObject(out,"expires",(double)r->expires);
     cJSON *history=cJSON_AddArrayToObject(out,"history");
     unsigned start=(r->next_message+HISTORY_LIMIT-r->message_count)%HISTORY_LIMIT;
-    for (unsigned k=0;k<r->message_count;k++)
-        cJSON_AddItemToArray(history,cJSON_Duplicate(r->history[(start+k)%HISTORY_LIMIT],1));
+    for (unsigned k=0;k<r->message_count;k++) {
+        cJSON *message = r->history[(start+k)%HISTORY_LIMIT];
+        if (!string_field(message, "type") || strcmp(string_field(message, "type"), "notice"))
+            cJSON_AddItemToArray(history,cJSON_Duplicate(message,1));
+    }
     send_json(c,out);
+}
+
+static void bot_mention(Member *member, const char *text) {
+    const char *mention = strstr(text, "@" BOT_NAME);
+    size_t length = strlen("@" BOT_NAME);
+    if (!mention) {
+        mention = strstr(text, "＠" BOT_NAME);
+        length = strlen("＠" BOT_NAME);
+    }
+    if (!mention) return;
+    const char *after = mention + length;
+    if (mention == text && !after[strspn(after, " \t\r\n")]) {
+        send_error(member->connection, "bot_unavailable", "请在 @群聊助手 后输入问题");
+        return;
+    }
+    time_t now = time(NULL);
+    if (!bot_worker || bot_worker->dead || bot_worker->closing) {
+        send_error(member->connection, "bot_unavailable", "群聊助手暂未连接");
+        return;
+    }
+    Room *room = &rooms[member->room];
+    BotRequest *request = NULL;
+    for (int k = 0; k < BOT_PENDING_LIMIT; ++k)
+        if (!room->bot_requests[k].deadline) { request = &room->bot_requests[k]; break; }
+    if (now < member->next_bot_request || !request) {
+        send_error(member->connection, "bot_unavailable", "群聊助手正在处理请求，请稍后再试");
+        return;
+    }
+    if (!random_token(request->id)) {
+        send_error(member->connection, "bot_unavailable", "群聊助手暂时无法接收请求");
+        return;
+    }
+    strcpy(request->asker, member->token);
+    request->deadline = now + 55;
+    member->next_bot_request = now + 4;
+    cJSON *out = event("bot_request");
+    cJSON_AddStringToObject(out, "instance", room->instance);
+    cJSON_AddStringToObject(out, "id", request->id);
+    cJSON_AddStringToObject(out, "question", text);
+    cJSON *history = cJSON_AddArrayToObject(out, "history");
+    for (unsigned k = 1; k < room->message_count && cJSON_GetArraySize(history) < BOT_CONTEXT_LIMIT; ++k) {
+        cJSON *message = room->history[(room->next_message + HISTORY_LIMIT - 1 - k) % HISTORY_LIMIT];
+        const char *kind = string_field(message, "type");
+        if (kind && !strcmp(kind, "chat")) cJSON_InsertItemInArray(history, 0, cJSON_Duplicate(message, 1));
+    }
+    send_json(bot_worker, out);
+}
+
+static void bot_reply(Client *c, cJSON *j) {
+    if (c != bot_worker) { send_error(c, "forbidden", "助手后台未授权"); return; }
+    const char *id = string_field(j, "id"), *text = string_field(j, "text");
+    int r = room_from_instance(string_field(j, "instance"));
+    if (r < 0 || !id) return;
+    for (int k = 0; k < BOT_PENDING_LIMIT; ++k) {
+        BotRequest *request = &rooms[r].bot_requests[k];
+        if (!request->deadline || strcmp(request->id, id)) continue;
+        if (!text || !valid_string(text, 2048, 0)) {
+            bot_error(r, request->asker, "群聊助手暂时无法回答，请稍后重试");
+        } else {
+            cJSON *out = event("chat");
+            cJSON_AddStringToObject(out, "nickname", BOT_NAME);
+            cJSON_AddStringToObject(out, "text", text);
+            cJSON_AddBoolToObject(out, "bot", 1);
+            publish_event(r, out);
+        }
+        memset(request, 0, sizeof *request);
+        return;
+    }
+}
+
+static void notice_identity(Client *c, cJSON *j, int room_required) {
+    if (!internal_authorized(j)) { send_error(c, "forbidden", "通知后台未授权"); return; }
+    const char *account = accounts_identity(string_field(j, "login"));
+    if (!account) { send_error(c, "login_required", "请先登录账号"); return; }
+    if (!room_required) {
+        cJSON *out = event("account_context");
+        cJSON_AddStringToObject(out, "account", account);
+        send_json(c, out);
+        return;
+    }
+    Member *owner = member_from_token(string_field(j, "token"));
+    if (!owner || !owner->owner || strcmp(owner->nickname, account)) {
+        send_error(c, "forbidden", "只有房主可以发布重要通知"); return;
+    }
+    Room *room = &rooms[owner->room];
+    cJSON *out = event("notice_context");
+    cJSON_AddStringToObject(out, "account", account);
+    cJSON_AddStringToObject(out, "instance", room->instance);
+    cJSON_AddStringToObject(out, "name", room->name);
+    cJSON *recipients = cJSON_AddArrayToObject(out, "recipients");
+    for (int i = 0; i < SESSION_LIMIT; ++i)
+        if (members[i].used && members[i].room == owner->room)
+            cJSON_AddItemToArray(recipients, cJSON_CreateString(members[i].nickname));
+    send_json(c, out);
+}
+
+static void notice_card(Client *c, cJSON *j) {
+    if (!internal_authorized(j)) { send_error(c, "forbidden", "通知后台未授权"); return; }
+    int r = room_from_instance(string_field(j, "instance"));
+    if (r < 0) { send_error(c, "room_not_found", "房间已关闭"); return; }
+    const char *id = string_field(j, "id"), *title = string_field(j, "title");
+    const char *text = string_field(j, "text"), *due = string_field(j, "due");
+    const char *status = string_field(j, "status"), *version = string_field(j, "revision");
+    if (!id || strlen(id) != 32 || strspn(id, "0123456789abcdef") != 32 ||
+        !title || !valid_string(title, 240, 1) || !text || !valid_string(text, 2048, 0) ||
+        !due || !valid_string(due, 32, 1) || !status ||
+        (strcmp(status, "scheduled") && strcmp(status, "cancelled")) ||
+        !version || !*version || strlen(version) > 8 || strspn(version, "0123456789") != strlen(version)) {
+        send_error(c, "invalid_notice", "重要通知字段无效"); return;
+    }
+    unsigned revision = (unsigned)strtoul(version, NULL, 10);
+    Room *room = &rooms[r];
+    NoticeCard *card = NULL;
+    for (int k = 0; k < NOTICE_LIMIT; ++k)
+        if (!room->notices[k].id[0] || !strcmp(room->notices[k].id, id)) { card = &room->notices[k]; break; }
+    if (!card) { send_error(c, "capacity", "房间通知已达到上限"); return; }
+    if (revision > card->revision) {
+        cJSON *out = event("notice");
+        cJSON_AddStringToObject(out, "id", id);
+        cJSON_AddStringToObject(out, "title", title);
+        cJSON_AddStringToObject(out, "text", text);
+        cJSON_AddStringToObject(out, "due", due);
+        cJSON_AddStringToObject(out, "status", status);
+        cJSON_AddNumberToObject(out, "revision", revision);
+        if (!card->id[0]) {
+            publish_event(r, out);
+        } else {
+            for (unsigned k = 0; k < HISTORY_LIMIT; ++k) {
+                const char *saved_id = string_field(room->history[k], "id");
+                if (saved_id && !strcmp(saved_id, id)) {
+                    cJSON_Delete(room->history[k]);
+                    room->history[k] = cJSON_Duplicate(out, 1);
+                    break;
+                }
+            }
+            broadcast(r, out);
+        }
+        strcpy(card->id, id);
+        card->revision = revision;
+    }
+    send_json(c, event("notice_ack"));
 }
 void room_message(Client *c, const char *text, size_t len) {
     room_tick(time(NULL));
@@ -309,9 +530,26 @@ void room_message(Client *c, const char *text, size_t len) {
         cJSON_Delete(j); send_error(c,"invalid_json","JSON 格式、字段类型或重复字段错误"); return;
     }
     if (!strcmp(type, "assistant_rpc")) { assistant_rpc(c,j);
+    } else if (!strcmp(type, "bot_watch")) {
+        if (!internal_authorized(j) || member_of(c) >= 0 || c->account[0])
+            send_error(c, "forbidden", "助手后台未授权");
+        else if (bot_worker && bot_worker != c)
+            send_error(c, "bot_busy", "群聊助手后台已连接");
+        else {
+            bot_worker = c;
+            send_json(c, event("bot_ready"));
+        }
+    } else if (!strcmp(type, "bot_reply")) {
+        bot_reply(c, j);
+    } else if (!strcmp(type, "account_identity") || !strcmp(type, "notice_room")) {
+        notice_identity(c, j, !strcmp(type, "notice_room"));
+    } else if (!strcmp(type, "notice_card")) {
+        notice_card(c, j);
     } else if (!strcmp(type, "auth_mode")) {
         cJSON *mode = event("auth_mode");
         cJSON_AddBoolToObject(mode, "required", accounts_active());
+        const char *secret = getenv("ASSISTANT_SHARED_SECRET");
+        cJSON_AddBoolToObject(mode, "assistant_enabled", secret && strlen(secret) >= 32);
         send_json(c, mode);
     } else if (accounts_handle(c, j, type)) {
         const char *password = string_field(j, "password");
@@ -328,7 +566,10 @@ void room_message(Client *c, const char *text, size_t len) {
             if (!strcmp(type,"chat")) {
                 const char *body = string_field(j,"text");
                 if (!body || !valid_string(body,2048,0)) send_error(c,"invalid_text","消息需要 1–2048 个合法 UTF-8 字节");
-                else publish_message(&members[i], "chat", "text", body);
+                else {
+                    publish_message(&members[i], "chat", "text", body);
+                    bot_mention(&members[i], body);
+                }
             } else if (!strcmp(type, "sticker")) {
                 const char *id = string_field(j, "id");
                 if (!valid_sticker(id)) send_error(c, "invalid_sticker", "没有这个贴图");
