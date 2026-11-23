@@ -12,10 +12,11 @@ import urllib.request
 from email import policy as email_policy
 from email.parser import BytesParser
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from assistant.registration import request_registration_code
+from assistant.registration import client_ip, request_registration_code
 from integration import Peer
 
 BINARY = ROOT / 'build' / 'chat_server'
@@ -83,6 +84,21 @@ def exchange(peer, name, invite, email=None):
         return message
 
 
+def proxy_identity_checks():
+    # 只采用代理写入的单一地址，直连使用连接对端地址。
+    trusted = SimpleNamespace(remote='127.0.0.1', headers={'X-Real-IP': '203.0.113.54'})
+    assert client_ip(trusted) == '203.0.113.54'
+    forwarded_only = SimpleNamespace(remote='127.0.0.1', headers={'X-Forwarded-For': '203.0.113.54'})
+    assert client_ip(forwarded_only) == '127.0.0.1'
+    direct = SimpleNamespace(remote='203.0.113.56', headers=trusted.headers)
+    assert client_ip(direct) == '203.0.113.56'
+    invalid = SimpleNamespace(remote='::1', headers={'X-Real-IP': 'invalid'})
+    assert client_ip(invalid) == '::1'
+    ipv6 = SimpleNamespace(remote='::1', headers={'X-Real-IP': '2001:0db8:0000::1'})
+    assert client_ip(ipv6) == '2001:db8::1'
+    print('PASS proxy-only address, invalid header fallback, canonical IPv6, direct peer')
+
+
 def direct_guards(database):
     saved = {key: os.environ.get(key) for key in (
         'REGISTRATION_EMAIL', 'ALLOW_EXTERNAL_EMAIL', 'SMTP_HOST', 'SMTP_PORT', 'ACCOUNTS_DB',
@@ -100,9 +116,10 @@ def direct_guards(database):
         assert status == 403 and 'code' not in body, body
         os.environ['REGISTRATION_IP_LIMIT'] = '2'
         os.environ['REGISTRATION_EMAIL_LIMIT'] = '5'
-        first, _ = request_registration_code(str(database), 'fail-one@example.test', '203.0.113.9')
-        second, _ = request_registration_code(str(database), 'fail-two@example.test', '203.0.113.9')
-        third, limited = request_registration_code(str(database), 'fail-three@example.test', '203.0.113.9')
+        connection = SimpleNamespace(remote='127.0.0.1', headers={'X-Real-IP': '203.0.113.9'})
+        first, _ = request_registration_code(str(database), 'fail-one@example.test', client_ip(connection))
+        second, _ = request_registration_code(str(database), 'fail-two@example.test', client_ip(connection))
+        third, limited = request_registration_code(str(database), 'fail-three@example.test', client_ip(connection))
         assert first == 503 and second == 503 and third == 429, (first, second, third, limited)
         assert '注册码' not in json.dumps(limited)
         with sqlite3.connect(database) as connection:
@@ -120,6 +137,7 @@ def direct_guards(database):
 def main():
     assert BINARY.is_file(), 'C server is not built'
     assert (CERTS / 'ca.crt').is_file(), 'local test certificates are missing'
+    proxy_identity_checks()
     direct_guards(Path('/tmp') / f'reg-guard-{os.getpid()}.sqlite3')
     import tempfile
     temp = tempfile.TemporaryDirectory(prefix='reg-email-')
@@ -131,7 +149,7 @@ def main():
     env.update(
         REGISTRATION_EMAIL='1', ALLOW_EXTERNAL_EMAIL='0', SMTP_HOST='127.0.0.1', SMTP_PORT=str(SMTP_PORT),
         SMTP_FROM='register@example.test', ACCOUNTS_DB=str(database), ASSISTANT_STATE=str(root),
-        REGISTRATION_CODE_TTL='600', REGISTRATION_RESEND_SECONDS='1', REGISTRATION_IP_LIMIT='20',
+        REGISTRATION_CODE_TTL='600', REGISTRATION_RESEND_SECONDS='60', REGISTRATION_IP_LIMIT='20',
         REGISTRATION_EMAIL_LIMIT='6', REGISTRATION_LIMIT_WINDOW='600', AI_MODE='rules',
     )
     env.pop('SMTP_USERNAME', None)
@@ -206,20 +224,22 @@ def main():
         time.sleep(0.3)
         expired_code = [item[2] for item in inbox_messages(capture_inbox) if item[1] == 'expire@example.test'][-1]
         with sqlite3.connect(database) as connection:
-            connection.execute('UPDATE invites SET expires=? WHERE code=?', (int(time.time()) - 5, expired_code))
+            now = int(time.time())
+            connection.execute('UPDATE invites SET expires=?, issued=? WHERE code=?',
+                               (now - 5, now - 61, expired_code))
         expired = exchange(Peer(CHAT_PORT, context), 'expireuser', expired_code, 'expire@example.test')
         assert expired['type'] == 'error' and expired['code'] == 'invite_expired'
 
-        time.sleep(1.1)
         before = len(inbox_messages(capture_inbox))
         status, _ = post({'email': 'expire@example.test'})
         assert status == 200
         time.sleep(0.3)
         refreshed = [item[2] for item in inbox_messages(capture_inbox) if item[1] == 'expire@example.test']
-        assert len(refreshed) == 2 and refreshed[-1] != expired_code
+        assert len(refreshed) == 2 and expired_code in refreshed
+        fresh_code, = set(refreshed) - {expired_code}
         stale = exchange(Peer(CHAT_PORT, context), 'expireuser', expired_code, 'expire@example.test')
         assert stale['code'] == 'invite_invalid'
-        renewed = exchange(Peer(CHAT_PORT, context), 'expireuser', refreshed[-1], 'expire@example.test')
+        renewed = exchange(Peer(CHAT_PORT, context), 'expireuser', fresh_code, 'expire@example.test')
         assert renewed['type'] == 'authenticated'
         assert len(inbox_messages(capture_inbox)) >= before + 1
 

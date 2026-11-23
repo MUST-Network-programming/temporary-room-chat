@@ -4,6 +4,7 @@ Default is off. This does not replace organizer-issued invites. A code is
 created only after the address is accepted for delivery, and it is deleted
 again if SMTP rejects the message. The code is never returned to the caller.
 """
+from ipaddress import ip_address
 import os
 import re
 import secrets
@@ -127,14 +128,20 @@ def send_registration(email, code):
 
 def client_ip(request):
     peer = request.remote or 'unknown'
-    loopback = peer.startswith('127.') or peer == '::1'
-    if not loopback:
-        return peer[:64]
-    forwarded = request.headers.get('X-Forwarded-For', '')
-    first = forwarded.split(',', 1)[0].strip()
-    if first and re.fullmatch(r'[0-9A-Za-z:.]{1,64}', first):
-        return first
-    return peer
+    try:
+        peer_address = ip_address(peer)
+    except ValueError:
+        return 'unknown'
+    if not peer_address.is_loopback:
+        return str(peer_address)
+
+    # 网关仅监听本机，公网入口须用 nginx 连接对端地址覆盖 X-Real-IP。
+    # 忽略客户端可提供的转发链。缺失或不合法时按本机连接统一限流。
+    try:
+        address = ip_address(request.headers.get('X-Real-IP', '').strip())
+    except ValueError:
+        return str(peer_address)
+    return str(address) if getattr(address, 'scope_id', None) is None else str(peer_address)
 
 
 def request_registration_code(db_path, email, ip):
