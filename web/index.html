@@ -398,6 +398,26 @@
                   至少 8 个字符。
                 </p>
               </div>
+              <div id="email-register" class="field" hidden>
+                <label for="register-email">邮箱</label>
+                <div class="email-row">
+                  <input
+                    id="register-email"
+                    type="email"
+                    maxlength="254"
+                    autocomplete="email"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    aria-describedby="register-email-hint"
+                  />
+                  <button id="send-register-code" class="secondary" type="button">
+                    发送注册码
+                  </button>
+                </div>
+                <p id="register-email-hint" class="field-hint">
+                  验证码只通过邮件发送，页面不会显示。未开启时仍向组织者领取注册码。
+                </p>
+              </div>
               <div id="invite-field" class="field" hidden>
                 <label for="invite-code">一次性注册码</label>
                 <input

@@ -1,4 +1,5 @@
 #include "accounts.h"
+#include <ctype.h>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
 #include <sqlite3.h>
@@ -8,6 +9,7 @@
 #define PASSWORD_ROUNDS 600000
 #define LOGIN_LIMIT 256
 #define LOGIN_TTL 43200
+#define INVITE_ATTEMPTS 5
 #define ACCOUNT_NAME_SQL "CREATE TABLE IF NOT EXISTS accounts(name TEXT PRIMARY KEY, salt BLOB NOT NULL, hash BLOB NOT NULL);"
 #define INVITE_SQL "CREATE TABLE IF NOT EXISTS invites(code TEXT PRIMARY KEY, used INTEGER NOT NULL DEFAULT 0);"
 
@@ -24,11 +26,12 @@ static unsigned attempts;
 static int execute(const char *sql) {
     return sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK;
 }
+static int migrate_accounts(void);
 
 int accounts_open(const char *path) {
     if (sqlite3_open(path, &db) == SQLITE_OK) {
         sqlite3_busy_timeout(db, 500);
-        if (execute(ACCOUNT_NAME_SQL INVITE_SQL)) return 1;
+        if (execute(ACCOUNT_NAME_SQL INVITE_SQL) && migrate_accounts()) return 1;
     }
     fprintf(stderr, "Could not open account database\n");
     accounts_close();
@@ -40,6 +43,31 @@ void accounts_close(void) {
     OPENSSL_cleanse(logins, sizeof logins);
 }
 int accounts_active(void) { return db != NULL; }
+
+static int column_exists(const char *table, const char *column) {
+    char sql[64];
+    sqlite3_stmt *stmt = NULL;
+    int found = 0;
+    snprintf(sql, sizeof sql, "PRAGMA table_info(%s)", table);
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(stmt, 1);
+        if (name && !strcmp(name, column)) found = 1;
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+static int migrate_accounts(void) {
+    if (!column_exists("invites", "email") && !execute("ALTER TABLE invites ADD COLUMN email TEXT")) return 0;
+    if (!column_exists("invites", "expires") && !execute("ALTER TABLE invites ADD COLUMN expires INTEGER")) return 0;
+    if (!column_exists("invites", "attempts") &&
+        !execute("ALTER TABLE invites ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")) return 0;
+    if (!column_exists("invites", "issued") && !execute("ALTER TABLE invites ADD COLUMN issued INTEGER")) return 0;
+    if (!column_exists("accounts", "email") && !execute("ALTER TABLE accounts ADD COLUMN email TEXT")) return 0;
+    if (!execute("CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_unique ON accounts(email) WHERE email IS NOT NULL")) return 0;
+    if (!execute("CREATE INDEX IF NOT EXISTS invites_email ON invites(email)")) return 0;
+    return 1;
+}
 
 static int random_hex(char *out, int count) {
     static const char hex[] = "0123456789abcdef";
@@ -83,33 +111,122 @@ static int password_hash(const char *password, const unsigned char salt[16], uns
                             EVP_sha256(), 32, hash) == 1;
 }
 
-static const char *register_account(const char *name, const char *password, const char *invite) {
+/* Same alphabet as assistant/registration.py: lowercase, one @, no spaces. */
+static int normalize_email(const char *in, char *out, size_t out_len) {
+    size_t n, at = 0, dots = 0;
+    if (!in) return 0;
+    n = strlen(in);
+    if (n < 5 || n > 254 || n + 1 > out_len) return 0;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)in[i];
+        if (c <= 32 || c >= 127) return 0;
+        out[i] = (char)tolower(c);
+        if (out[i] == '@') {
+            if (at || i == 0 || i + 1 >= n) return 0;
+            at = i;
+        }
+    }
+    out[n] = 0;
+    if (!at || (at > 64) || out[0] == '.' || out[at - 1] == '.' || out[at + 1] == '.' || out[n - 1] == '.') return 0;
+    for (size_t i = 0; i < n; ++i) {
+        char c = out[i];
+        int ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '%' || c == '+' || c == '-' || c == '@';
+        if (!ok) return 0;
+        if (i > at && c == '.') ++dots;
+    }
+    return dots > 0;
+}
+static const char *register_account(const char *name, const char *password, const char *invite, const char *email) {
+    char given[255], bound[255];
+    int has_email = email && email[0];
+    if (has_email && !normalize_email(email, given, sizeof given)) return "invite_invalid";
     if (!invite || strlen(invite) != 32 || invite[strspn(invite, "0123456789abcdef")])
         return "invite_invalid";
     unsigned char salt[16], hash[32];
     if (RAND_bytes(salt, sizeof salt) != 1 || !password_hash(password, salt, hash))
         return "account_storage";
-    if (!execute("BEGIN IMMEDIATE")) return "account_storage";
+    if (!execute("BEGIN IMMEDIATE")) { OPENSSL_cleanse(hash, sizeof hash); return "account_storage"; }
     /* 账号与邀请码在同一个事务提交，重复请求不能得到第二个账号。 */
-    const char *error = "account_storage";
-    sqlite3_stmt *stmt = prepare("UPDATE invites SET used=1 WHERE code=? AND used=0");
-    if (stmt && bind_text(stmt, 1, invite) && sqlite3_step(stmt) == SQLITE_DONE) {
-        error = sqlite3_changes(db) == 1 ? NULL : "invite_invalid";
+    const char *error = NULL;
+    int dirty = 0;
+    const char *stored_email = NULL;
+    sqlite3_stmt *stmt = prepare("SELECT used, email, expires, attempts FROM invites WHERE code=?");
+    int found = stmt && bind_text(stmt, 1, invite) && sqlite3_step(stmt) == SQLITE_ROW;
+    int used = 0, attempts = 0, has_expiry = 0;
+    sqlite3_int64 expires = 0;
+    if (found) {
+        used = sqlite3_column_int(stmt, 0);
+        if (sqlite3_column_type(stmt, 1) != SQLITE_NULL) {
+            const unsigned char *text = sqlite3_column_text(stmt, 1);
+            if (!text || strlen((const char *)text) >= sizeof bound) error = "account_storage";
+            else { strcpy(bound, (const char *)text); stored_email = bound; }
+        }
+        has_expiry = sqlite3_column_type(stmt, 2) != SQLITE_NULL;
+        if (has_expiry) expires = sqlite3_column_int64(stmt, 2);
+        attempts = sqlite3_column_int(stmt, 3);
     }
     sqlite3_finalize(stmt);
-    if (!error) {
-        stmt = prepare("INSERT INTO accounts(name,salt,hash) VALUES (?,?,?)");
-        int result = SQLITE_ERROR;
-        if (stmt && bind_text(stmt, 1, name) &&
-            sqlite3_bind_blob(stmt, 2, salt, sizeof salt, SQLITE_TRANSIENT) == SQLITE_OK &&
-            sqlite3_bind_blob(stmt, 3, hash, sizeof hash, SQLITE_TRANSIENT) == SQLITE_OK)
-            result = sqlite3_step(stmt);
+    if (!found) error = error ? error : "invite_invalid";
+    else if (used) error = "invite_invalid"; /* 重放与未知码使用同一错误，避免把已使用码单独暴露给旧客户端。 */
+    else if (has_expiry && expires <= (sqlite3_int64)time(NULL)) error = "invite_expired";
+    else if (attempts >= INVITE_ATTEMPTS) error = "invite_invalid";
+    else if (stored_email && (!has_email || strcmp(given, stored_email))) {
+        int next = attempts + 1;
+        stmt = prepare(next >= INVITE_ATTEMPTS
+            ? "UPDATE invites SET attempts=?, used=1 WHERE code=? AND used=0"
+            : "UPDATE invites SET attempts=? WHERE code=? AND used=0");
+        dirty = 1;
+        if (!stmt || sqlite3_bind_int(stmt, 1, next) != SQLITE_OK || !bind_text(stmt, 2, invite) ||
+            sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) != 1) error = "account_storage";
+        else error = "invite_invalid";
         sqlite3_finalize(stmt);
-        if (result != SQLITE_DONE)
-            error = result == SQLITE_CONSTRAINT ? "name_taken" : "account_storage";
+    }
+    if (!error) {
+        stmt = prepare("SELECT 1 FROM accounts WHERE name=?");
+        int taken = stmt && bind_text(stmt, 1, name) && sqlite3_step(stmt) == SQLITE_ROW;
+        sqlite3_finalize(stmt);
+        if (taken) error = "name_taken";
+    }
+    if (!error && stored_email) {
+        stmt = prepare("SELECT 1 FROM accounts WHERE email=?");
+        int taken = stmt && bind_text(stmt, 1, stored_email) && sqlite3_step(stmt) == SQLITE_ROW;
+        sqlite3_finalize(stmt);
+        if (taken) {
+            stmt = prepare("UPDATE invites SET used=1 WHERE code=? AND used=0");
+            dirty = 1;
+            if (!stmt || !bind_text(stmt, 1, invite) || sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) != 1)
+                error = "account_storage";
+            else error = "email_taken";
+            sqlite3_finalize(stmt);
+        }
+    }
+    if (!error) {
+        stmt = prepare(
+            "UPDATE invites SET used=1 WHERE code=? AND used=0 AND attempts<? "
+            "AND (expires IS NULL OR expires>?) AND (email IS NULL OR email=?)");
+        int consumed = stmt && bind_text(stmt, 1, invite) &&
+            sqlite3_bind_int(stmt, 2, INVITE_ATTEMPTS) == SQLITE_OK &&
+            sqlite3_bind_int64(stmt, 3, (sqlite3_int64)time(NULL)) == SQLITE_OK &&
+            sqlite3_bind_text(stmt, 4, stored_email, stored_email ? -1 : 0, SQLITE_TRANSIENT) == SQLITE_OK &&
+            sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) == 1;
+        sqlite3_finalize(stmt);
+        if (!consumed) error = "invite_invalid";
+        else {
+            stmt = prepare("INSERT INTO accounts(name,salt,hash,email) VALUES (?,?,?,?)");
+            int result = SQLITE_ERROR;
+            if (stmt && bind_text(stmt, 1, name) &&
+                sqlite3_bind_blob(stmt, 2, salt, sizeof salt, SQLITE_TRANSIENT) == SQLITE_OK &&
+                sqlite3_bind_blob(stmt, 3, hash, sizeof hash, SQLITE_TRANSIENT) == SQLITE_OK &&
+                sqlite3_bind_text(stmt, 4, stored_email, stored_email ? -1 : 0, SQLITE_TRANSIENT) == SQLITE_OK)
+                result = sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+            if (result != SQLITE_DONE) error = result == SQLITE_CONSTRAINT ? "name_taken" : "account_storage";
+            else dirty = 1;
+        }
     }
     OPENSSL_cleanse(hash, sizeof hash);
     if (!error && execute("COMMIT")) return NULL;
+    if (error && dirty && execute("COMMIT")) return error;
     execute("ROLLBACK");
     return error ? error : "account_storage";
 }
@@ -159,6 +276,8 @@ static void issue_login(Client *client, const char *name) {
 }
 static const char *error_text(const char *error) {
     if (!strcmp(error, "invite_invalid")) return "注册码无效或已使用";
+    if (!strcmp(error, "invite_expired")) return "注册码已过期";
+    if (!strcmp(error, "email_taken")) return "该邮箱已注册";
     if (!strcmp(error, "name_taken")) return "用户名已注册";
     return "账号存储暂时不可用";
 }
@@ -203,7 +322,7 @@ int accounts_handle(Client *client, const cJSON *message, const char *type) {
         }
         ++attempts; client->next_auth_attempt = now + 1;
         if (registration) {
-            const char *error = register_account(name, password, field(message, "invite"));
+            const char *error = register_account(name, password, field(message, "invite"), field(message, "email"));
             if (error) { send_error(client, error, error_text(error)); return 1; }
         } else if (!check_password(name, password)) {
             send_error(client, "login_invalid", "用户名或密码错误");

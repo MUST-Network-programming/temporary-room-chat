@@ -451,11 +451,14 @@ function onMessage(event) {
         send({ type: "authenticate", token: loginToken });
       } else if (!authRequired) restoreRoom();
       if (!joined) showLobby();
+      if (authRequired) loadRegistrationPolicy();
+      else applyRegistrationMode();
       controls();
       break;
     case "authenticated":
       const shouldRestore = resumingLogin && session?.nickname === data.name;
       $("invite-code").value = "";
+      $("register-email").value = "";
       account = data.name;
       authPending = resumingLogin = false;
       saveLogin(data.token);
@@ -661,6 +664,56 @@ function enter(type) {
   }
   controls();
 }
+let emailRegistration = false;
+function applyRegistrationMode() {
+  const show = registering && emailRegistration;
+  $("email-register").hidden = !show;
+  $("register-email").required = show;
+  $("invite-code-hint").textContent = emailRegistration
+    ? "注册码只发到邮箱，页面不会显示。未开启邮箱注册时，仍向组织者领取。"
+    : "向活动组织者领取注册码。";
+}
+async function loadRegistrationPolicy() {
+  emailRegistration = false;
+  try {
+    const response = await fetch("/api/register/policy");
+    if (response.ok) {
+      const data = await response.json();
+      emailRegistration = data.email_registration === true;
+    }
+  } catch (_) {
+    emailRegistration = false;
+  }
+  applyRegistrationMode();
+}
+$("send-register-code").addEventListener("click", async () => {
+  const email = $("register-email").value.trim();
+  const button = $("send-register-code");
+  if (!emailRegistration) return;
+  if (!email) {
+    notice("请填写接收注册码的邮箱。");
+    $("register-email").focus();
+    return;
+  }
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/register/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notice(data.error || "注册码未能发出");
+      return;
+    }
+    notice("如果该邮箱可以注册，验证码会发到邮箱。邮件里的注册码不会出现在本页。");
+  } catch (_) {
+    notice("注册码未能发出");
+  } finally {
+    button.disabled = false;
+  }
+});
 $("account-toggle").addEventListener("click", () => {
   registering = !registering;
   $("account-title").textContent = registering ? "注册账号" : "登录聊天室";
@@ -673,6 +726,7 @@ $("account-toggle").addEventListener("click", () => {
     : "注册账号";
   $("invite-field").hidden = !registering;
   $("invite-code").required = registering;
+  applyRegistrationMode();
   $("account-password").autocomplete = registering
     ? "new-password"
     : "current-password";
@@ -690,7 +744,17 @@ $("account-form").addEventListener("submit", (event) => {
     name: $("account-name").value.trim(),
     password,
   };
-  if (registering) request.invite = $("invite-code").value.trim();
+  if (registering) {
+    request.invite = $("invite-code").value.trim();
+    if (emailRegistration) {
+      const email = $("register-email").value.trim();
+      if (!email) {
+        notice("请填写接收注册码的邮箱。");
+        return;
+      }
+      request.email = email;
+    }
+  }
   authPending = send(request);
   if (authPending) $("account-password").value = "";
   controls();

@@ -1,5 +1,5 @@
 """Independent itinerary API, scheduler, and a real loopback-only SMTP inbox."""
-import argparse, asyncio, hashlib, html, json, os, re, smtplib, sqlite3, ssl, time, uuid
+import argparse, asyncio, hashlib, html, json, os, re, smtplib, sqlite3, ssl, sys, time, uuid
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from email import policy
@@ -9,6 +9,9 @@ from zoneinfo import ZoneInfo
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from assistant.registration import client_ip, enabled as registration_enabled, request_registration_code, accounts_path
 STATE = Path(os.environ.get('ASSISTANT_STATE', str(ROOT / '.local-v2')))
 TZ = ZoneInfo('Asia/Shanghai')
 FIELDS = {'date':'日期', 'meeting_time':'集合时间', 'meeting_place':'集合地点', 'destination':'目的地',
@@ -255,6 +258,21 @@ async def proxy_ws(request):
             await asyncio.gather(relay(front,back),relay(back,front))
     return front
 
+async def registration_policy(_request):
+    return web.json_response({
+        'email_registration': registration_enabled(),
+        'local_only': os.environ.get('ALLOW_EXTERNAL_EMAIL') != '1',
+    })
+
+async def registration_code(request):
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({'error': '邮箱格式无效'}, status=400)
+    email = body.get('email') if isinstance(body, dict) else None
+    status, payload = await asyncio.to_thread(request_registration_code, accounts_path(), email, client_ip(request))
+    return web.json_response(payload, status=status)
+
 async def static(request):
     name=request.match_info.get('file') or 'index.html'
     if name not in ('index.html','app.js','style.css'): raise web.HTTPNotFound()
@@ -354,6 +372,8 @@ def main():
     if args.role=='worker': asyncio.run(worker()); return
     app=web.Application(middlewares=[errors],client_max_size=16384)
     if args.role=='serve':
+        app.router.add_get('/api/register/policy', registration_policy)
+        app.router.add_post('/api/register/code', registration_code)
         app.router.add_route('*','/api/itinerary/{action}',api)
         app.router.add_get('/ws',proxy_ws)
         app.router.add_get('/',static); app.router.add_get('/{file}',static)

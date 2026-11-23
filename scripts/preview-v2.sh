@@ -11,6 +11,7 @@ export ASSISTANT_SHARED_SECRET="${ASSISTANT_SHARED_SECRET:-$("$PYTHON" -c 'impor
 export CHAT_INTERNAL_WS="ws://127.0.0.1:${CHAT_PORT:-8081}/ws"
 export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://43.129.182.26}"
 export AI_MODE=rules ALLOW_EXTERNAL_EMAIL=0 SMTP_HOST=127.0.0.1 SMTP_PORT=1025
+export REGISTRATION_EMAIL=0
 unset SMTP_USERNAME SMTP_PASSWORD SMTP_SSL
 cmake -S . -B build >/dev/null
 cmake --build build -j2 >/dev/null
