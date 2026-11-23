@@ -315,7 +315,8 @@ const compactRoom = matchMedia("(max-width: 680px)");
 function showRoomInfo(expanded) {
   $("room-info").setAttribute("aria-expanded", String(expanded));
   $("room-sidebar").classList.toggle("expanded", expanded);
-  if (expanded) $("itinerary-panel").hidden = true;
+  if (expanded) closeItinerary();
+  else resizeDraft();
 }
 $("room-info").addEventListener("click", () => {
   const expanded = $("room-info").getAttribute("aria-expanded") === "true";
@@ -353,7 +354,8 @@ function send(data) {
 }
 function resetRoom(message) {
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
-  $("itinerary-panel").hidden = true; $("pinned-itinerary").hidden = true;
+  closeItinerary();
+  $("pinned-itinerary").hidden = true;
   session = null;
   joined = false;
   pending = false;
@@ -957,11 +959,19 @@ function syncItineraryLabels() {
   }
 }
 const itineraryFields = {date:"日期",meeting_time:"集合时间",meeting_place:"集合地点",destination:"目的地",transport:"交通",duration:"停留时长",regroup_time:"游览结束集合时间",regroup_place:"再次集合地点",seats:"车辆座位数",notes:"注意事项",route:"行程安排"};
+const pendingTripValue = "待确认";
 for (const [key,label] of Object.entries(itineraryFields)) {
   const el = document.createElement("label"); el.textContent = label;
   const input = document.createElement(["notes","route"].includes(key) ? "textarea" : "input");
-  input.id = "trip-" + key; input.maxLength = 400;
-  input.placeholder = key === "date" ? "YYYY-MM-DD" : key.endsWith("time") ? "HH:MM" : "待确认";
+  input.id = "trip-" + key;
+  if (key === "date") {
+    input.type = "date";
+  } else if (key === "meeting_time" || key === "regroup_time") {
+    input.type = "time";
+  } else {
+    input.maxLength = 400;
+    input.placeholder = pendingTripValue;
+  }
   if (["meeting_place","regroup_place","notes","route"].includes(key)) el.className = "wide";
   el.append(input); $("itinerary-fields").append(el);
 }
@@ -970,13 +980,23 @@ function openItinerary() {
   $("itinerary-panel").hidden=false; $("itinerary-toggle").setAttribute("aria-expanded","true");
   showRoomInfo(false); refreshItinerary();
 }
+function closeItinerary() {
+  $("itinerary-panel").hidden = true;
+  $("itinerary-toggle").setAttribute("aria-expanded", "false");
+  resizeDraft();
+}
 $("itinerary-toggle").addEventListener("click", () => {
   if ($("itinerary-panel").hidden) openItinerary();
-  else { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); }
+  else closeItinerary();
 });
-$("itinerary-close").addEventListener("click", () => { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); $("itinerary-toggle").focus(); });
+$("itinerary-close").addEventListener("click", () => {
+  closeItinerary();
+  $("itinerary-toggle").focus();
+});
 $("pinned-itinerary").addEventListener("click",openItinerary);
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); } });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("itinerary-panel").hidden) closeItinerary();
+});
 async function itineraryAPI(action, body) {
   if (!assistantToken || !joined) throw new Error("请先加入房间");
   const r = await fetch("/api/itinerary/"+action,{method:body ? "POST":"GET", headers:{"Authorization":"Bearer "+assistantToken,...(body ? {"Content-Type":"application/json"}:{})},...(body ? {body:JSON.stringify(body)}:{})});
@@ -998,7 +1018,12 @@ async function refreshItinerary(force=false) {
       $("itinerary-form").hidden=!current;
       $("itinerary-version").textContent=current ? "v"+current.version+ (current.status==="draft" ? " · 草稿，尚未发布" : " · 已确认行程") : "暂无行程";
       $("confirm-tools").hidden=!state.owner;
-      for(const name of Object.keys(itineraryFields)) { $("trip-"+name).value=current?.data[name] || ""; $("trip-"+name).readOnly=!state.owner; }
+      for (const name of Object.keys(itineraryFields)) {
+        const input = $("trip-" + name);
+        const value = current?.data[name];
+        input.value = value === pendingTripValue ? "" : (value ?? "");
+        input.readOnly = !state.owner;
+      }
       const conflicts=current?.data.conflicts || [];
       $("itinerary-conflicts").textContent=conflicts.join("；"); $("resolve-row").hidden=!state.owner || !conflicts.length; $("resolve-conflicts").checked=false;
       $("demo-reminder").checked=false; $("demo-reminder").closest("label").hidden=!state.local_only;
@@ -1033,7 +1058,10 @@ async function generateItinerary() {
 $("extract-itinerary").addEventListener("click",generateItinerary);
 function editedTrip() {
   const data={...itineraryData.data};
-  for(const key of Object.keys(itineraryFields)) data[key]=$("trip-"+key).value.trim();
+  for (const key of Object.keys(itineraryFields)) {
+    // 接口用「待确认」保存未填写的项目，表单里只把它当作提示。
+    data[key] = $("trip-" + key).value.trim() || pendingTripValue;
+  }
   if($("resolve-conflicts").checked) data.conflicts=[];
   return data;
 }
