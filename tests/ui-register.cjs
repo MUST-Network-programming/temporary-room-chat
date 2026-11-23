@@ -76,6 +76,30 @@ async function until(fn, label) {
 const get = (dom, id) => dom.window.document.getElementById(id);
 const invite = "ab".repeat(16);
 
+function checkPasswordToggle(dom) {
+  const field = get(dom, "account-password");
+  const button = get(dom, "account-show-password");
+  const activeIcon = () => button.querySelector("[data-icon]:not([hidden])");
+  const sample = "password-preview";
+  field.value = sample;
+
+  assert.equal(field.type, "password");
+  assert.equal(button.getAttribute("aria-label"), "显示密码");
+  assert.equal(activeIcon()?.dataset.icon, "eye");
+  assert.equal(activeIcon().querySelector("svg")?.getAttribute("aria-hidden"), "true");
+  button.click();
+  assert.equal(field.type, "text");
+  assert.equal(field.value, sample);
+  assert.equal(button.getAttribute("aria-label"), "隐藏密码");
+  assert.equal(activeIcon()?.dataset.icon, "eye-off");
+  button.click();
+  assert.equal(field.type, "password");
+  assert.equal(field.value, sample);
+  assert.equal(button.getAttribute("aria-label"), "显示密码");
+  assert.equal(activeIcon()?.dataset.icon, "eye");
+  field.value = "";
+}
+
 function submitAccount(client, name) {
   get(client.dom, "account-name").value = name;
   get(client.dom, "account-password").value = "email-pass-2026";
@@ -91,8 +115,10 @@ function submitAccount(client, name) {
   const manual = page({ email_registration: true, local_only: true });
   try {
     await until(() => get(enabled.dom, "account-panel").hidden === false, "account panel");
+    checkPasswordToggle(enabled.dom);
     get(enabled.dom, "account-toggle").click();
     await until(() => get(enabled.dom, "email-register").hidden === false, "email form");
+    checkPasswordToggle(enabled.dom);
     assert.equal(get(disabled.dom, "email-register").hidden, true);
     get(disabled.dom, "account-toggle").click();
     await pause(50);

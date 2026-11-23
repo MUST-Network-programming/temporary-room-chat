@@ -8,6 +8,9 @@ const iconPaths = {
   users:
     '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m3 10v-3a6 6 0 0 0-2-4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/>',
+  eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/>',
+  "eye-off":
+    '<path d="m3 3 18 18M10.6 6.1c.5-.1.9-.1 1.4-.1 6.5 0 10 6 10 6a16 16 0 0 1-3 3.4M6.3 7.8A16 16 0 0 0 2 12s3.5 6 10 6c1.5 0 2.8-.3 4-.8M10 10a2.8 2.8 0 0 0 4 4"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>',
   smile:
     '<circle cx="12" cy="12" r="9"/><path d="M8 14a4 4 0 0 0 8 0M8 8.5h.01M16 8.5h.01"/>',
@@ -759,7 +762,8 @@ function accountError(message, fieldId) {
 function revealPassword(revealed) {
   $("account-password").type = revealed ? "text" : "password";
   const button = $("account-show-password");
-  button.textContent = revealed ? "隐藏" : "显示";
+  button.querySelector('[data-icon="eye"]').hidden = revealed;
+  button.querySelector('[data-icon="eye-off"]').hidden = !revealed;
   button.setAttribute("aria-label", revealed ? "隐藏密码" : "显示密码");
 }
 function applyRegistrationPolicy() {
