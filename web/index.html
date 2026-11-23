@@ -298,60 +298,60 @@
                 </button>
               </div>
               <p id="room-notice" class="room-notice" role="status" hidden></p>
-              <form id="message-form" class="composer">
-                <div class="composer-row">
-                  <button
-                    id="expression-toggle"
-                    class="secondary"
-                    type="button"
-                    aria-expanded="false"
-                    aria-controls="expression-options"
-                    aria-label="选择表情和贴图"
-                    title="表情与贴图"
-                  >
-                    <span data-icon="smile"></span>
-                  </button>
-                  <label class="sr-only" for="message">消息内容</label>
-                  <textarea
-                    id="message"
-                    rows="1"
-                    maxlength="2048"
-                    placeholder="输入消息，@行程助手 提取行程…"
-                    required
-                  ></textarea>
-                  <button
-                    id="send"
-                    aria-label="发送消息"
-                    type="submit"
-                    disabled
-                  >
-                    <span>发送</span><span data-icon="send"></span>
-                  </button>
-                </div>
-                <p class="composer-hint">
-                  <span>支持表情与贴图</span
-                  ><span>Enter 发送 · Shift + Enter 换行</span>
-                </p>
-                <div id="expression-options" hidden>
-                  <p id="emoji-label" class="expression-label">插入表情</p>
-                  <div
-                    id="emoji-options"
-                    class="expression-grid"
-                    role="group"
-                    aria-labelledby="emoji-label"
-                  ></div>
-                  <p id="sticker-label" class="expression-label">
-                    直接发送贴图
-                  </p>
-                  <div
-                    id="sticker-options"
-                    class="expression-grid"
-                    role="group"
-                    aria-labelledby="sticker-label"
-                  ></div>
-                </div>
-              </form>
             </div>
+            <form id="message-form" class="composer">
+              <div class="composer-row">
+                <button
+                  id="expression-toggle"
+                  class="secondary"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="expression-options"
+                  aria-label="选择表情和贴图"
+                  title="表情与贴图"
+                >
+                  <span data-icon="smile"></span>
+                </button>
+                <label class="sr-only" for="message">消息内容</label>
+                <textarea
+                  id="message"
+                  rows="1"
+                  maxlength="2048"
+                  placeholder="输入消息，@行程助手 提取行程…"
+                  required
+                ></textarea>
+                <button
+                  id="send"
+                  aria-label="发送消息"
+                  type="submit"
+                  disabled
+                >
+                  <span>发送</span><span data-icon="send"></span>
+                </button>
+              </div>
+              <p class="composer-hint">
+                <span>支持表情与贴图</span
+                ><span>Enter 发送 · Shift + Enter 换行</span>
+              </p>
+              <div id="expression-options" hidden>
+                <p id="emoji-label" class="expression-label">插入表情</p>
+                <div
+                  id="emoji-options"
+                  class="expression-grid"
+                  role="group"
+                  aria-labelledby="emoji-label"
+                ></div>
+                <p id="sticker-label" class="expression-label">
+                  直接发送贴图
+                </p>
+                <div
+                  id="sticker-options"
+                  class="expression-grid"
+                  role="group"
+                  aria-labelledby="sticker-label"
+                ></div>
+              </div>
+            </form>
           </section>
           <section
             id="account-panel"

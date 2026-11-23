@@ -25,7 +25,11 @@ function send(d,text){get(d,'message').value=text;get(d,'message').dispatchEvent
  click(b,'itinerary-toggle');await until(()=>get(b,'extraction-mode').textContent.includes('非 AI'),'label');assert.equal(get(b,'owner-tools').hidden,true);
  get(b,'subscriber-email').value='dom-traveler@example.test';submit(b,'subscription-form');await until(()=>get(b,'subscription-state').textContent.includes('已订阅'),'subscribe');
  send(a,'@行程助手 生成行程');await until(()=>!get(a,'itinerary-form').hidden,'@ generated draft');
- assert.equal(get(a,'trip-meeting_place').value,'酒店大堂');assert.equal(get(a,'trip-transport').value,'待确认');
+ assert.equal(get(a,'trip-meeting_place').value,'酒店大堂');
+ assert.equal(get(a,'trip-transport').value,'');assert.equal(get(a,'trip-transport').placeholder,'待确认');
+ assert.equal(get(a,'trip-date').type,'date');assert.equal(get(a,'trip-date').value,tomorrow);
+ assert.equal(get(a,'trip-meeting_time').type,'time');assert.equal(get(a,'trip-meeting_time').value,'08:30');
+ assert.equal(get(a,'trip-regroup_time').type,'time');assert.equal(get(a,'trip-regroup_time').value,'');
  get(a,'trip-meeting_place').value='酒店一楼大堂';submit(a,'itinerary-form');await until(()=>get(a,'pinned-itinerary').textContent.includes('酒店一楼大堂'),'confirm pinned');
  await until(()=>get(b,'messages').textContent.includes('房主已确认'),'publish');
  await until(()=>get(a,'messages').querySelector('.is-current-pin .itinerary-version-label')?.textContent.includes('当前置顶'),'v1 current pin label');
@@ -46,4 +50,10 @@ function send(d,text){get(d,'message').value=text;get(d,'message').dispatchEvent
  get(a,'theme').value='dark';get(a,'theme').dispatchEvent(new a.window.Event('change'));assert.equal(a.window.document.documentElement.dataset.theme,'dark');
  click(a,'close-room');await until(()=>get(b,'room-view').hidden,'owner close');
  assert.deepEqual(errors,[]);console.log('PASS DOM real WS chat, escaping, rename, @→draft, owner edit/confirm, read-only member, subscriptions, v2 pin labels (historical vs current), accessible theme picker, dark theme, close; no browser/visual QA performed');
- }finally{for(const s of sockets)s.close();a.window.close();b.window.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
+ }finally{
+   for (const socket of sockets) {
+     socket.onclose = null;
+     socket.close();
+   }
+   a.window.close();b.window.close();
+ }})().catch(e=>{console.error(e);process.exitCode=1;});
