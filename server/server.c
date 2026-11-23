@@ -10,7 +10,8 @@
 #include <sys/stat.h>
 #endif
 Client clients[MAX_CLIENTS];
-unsigned room_ttl=3600;
+#define ROOM_TTL_SECONDS (7u * 24u * 60u * 60u)
+unsigned room_ttl=ROOM_TTL_SECONDS;
 static volatile sig_atomic_t stopping;
 static size_t pending_write[MAX_CLIENTS];
 static unsigned char read_buffer[MAX_CLIENTS][16384];
@@ -83,6 +84,7 @@ static int parse_number(const char *text, unsigned long maximum, unsigned *out) 
 int main(int argc, char **argv) {
     unsigned port=8080; const char *bind_address="127.0.0.1", *cert=NULL,*key=NULL;
     const char *account_path = "accounts.sqlite3";
+    const char *rooms_path = getenv("CHAT_ROOMS_DB");
     int anonymous = 0, invite = 0;
 #ifndef _WIN32
     umask(0077);
@@ -94,11 +96,12 @@ int main(int argc, char **argv) {
         if (i+1>=argc) goto usage;
         const char *option=argv[i], *value=argv[++i];
         if (!strcmp(option,"--port")) { if (!parse_number(value,65535,&port)) goto usage; }
-        else if (!strcmp(option,"--ttl")) { if (!parse_number(value,86400,&room_ttl)) goto usage; }
+        else if (!strcmp(option,"--ttl")) { if (!parse_number(value,ROOM_TTL_SECONDS,&room_ttl)) goto usage; }
         else if (!strcmp(option,"--bind")) bind_address=value;
         else if (!strcmp(option,"--cert")) cert=value;
         else if (!strcmp(option,"--key")) key=value;
         else if (!strcmp(option,"--accounts")) account_path=value;
+        else if (!strcmp(option,"--rooms-db")) rooms_path=value;
         else goto usage;
     }
     if (invite) {
@@ -109,9 +112,28 @@ int main(int argc, char **argv) {
     }
     if (!!cert != !!key || (!anonymous && !cert) ||
         (anonymous && strcmp(bind_address, "127.0.0.1"))) goto usage;
-    if (!anonymous && !accounts_open(account_path)) return 1;
-    if (!network_init()) return 1;
-    if (cert && !tls_init(cert,key)) { network_cleanup(); return 1; }
+    if (!anonymous) {
+        if (!accounts_open(account_path)) return 1;
+        char *default_path = NULL;
+        if (!rooms_path || !*rooms_path) {
+            if (!strcmp(account_path, ":memory:")) rooms_path = account_path;
+            else {
+                const char suffix[] = ".rooms.sqlite3";
+                default_path = malloc(strlen(account_path) + sizeof(suffix));
+                if (default_path) {
+                    strcpy(default_path, account_path);
+                    strcat(default_path, suffix);
+                }
+                rooms_path = default_path;
+            }
+        }
+        int ready = rooms_path && rooms_storage_open(rooms_path);
+        if (!ready) fprintf(stderr, "Could not open or restore the rooms database\n");
+        free(default_path);
+        if (!ready) goto storage_failure;
+    }
+    if (!network_init()) goto storage_failure;
+    if (cert && !tls_init(cert,key)) goto failure;
     socket_t listener=socket(AF_INET,SOCK_STREAM,0);
     if (listener==BAD_SOCKET) { fprintf(stderr,"socket failed\n"); goto failure; }
     int reuse=1;
@@ -161,9 +183,11 @@ int main(int argc, char **argv) {
         room_tick(now);
     }
     for (int i=0;i<MAX_CLIENTS;i++) if (clients[i].active) disconnect_client(&clients[i]);
-    close_socket(listener); tls_cleanup(); network_cleanup(); accounts_close(); return 0;
+    close_socket(listener); tls_cleanup(); network_cleanup(); rooms_storage_close(); accounts_close(); return 0;
 failure:
-    tls_cleanup(); network_cleanup(); accounts_close(); return 1;
+    tls_cleanup(); network_cleanup();
+storage_failure:
+    rooms_storage_close(); accounts_close(); return 1;
 usage:
-    fprintf(stderr,"Usage: chat_server [--bind IPv4] [--port 8080] [--ttl 3600] [--log-chat] [--accounts FILE] --cert FILE --key FILE\n       chat_server [--accounts FILE] --issue-invite\n       chat_server --anonymous-loopback [--port PORT]\n"); return 2;
+    fprintf(stderr,"Usage: chat_server [--bind IPv4] [--port 8080] [--ttl 604800] [--log-chat] [--accounts FILE] [--rooms-db FILE] --cert FILE --key FILE\n       chat_server [--accounts FILE] --issue-invite\n       chat_server --anonymous-loopback [--port PORT]\n"); return 2;
 }
