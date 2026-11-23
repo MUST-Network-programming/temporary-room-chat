@@ -19,8 +19,10 @@ from aiohttp import web
 
 if __package__:
     from .backend import SECRET, ChatError, chat_rpc, deliver, local_mail_only
+    from .registration import verified_email
 else:
     from backend import SECRET, ChatError, chat_rpc, deliver, local_mail_only
+    from registration import verified_email
 
 TZ = ZoneInfo('Asia/Shanghai')
 STATE = Path(os.environ.get('ASSISTANT_STATE', str(Path(__file__).resolve().parents[1] / '.local-v2')))
@@ -134,7 +136,21 @@ def confirm_email(account, payload):
 def contact(account):
     with database() as conn:
         row = conn.execute('SELECT email FROM contacts WHERE account=?', (account,)).fetchone()
-    return {'email': row['email'] if row else None, 'local_only': local_mail_only()}
+    return {'email': row['email'] if row else None,
+            'registration_email': verified_email(account) if not row else None,
+            'local_only': local_mail_only()}
+
+
+def use_registration_email(account):
+    email = verified_email(account)
+    if not email:
+        raise ValueError('当前没有可用于接收通知的注册邮箱')
+    with database() as conn:
+        conn.execute('INSERT INTO contacts(account,email) VALUES(?,?) ON CONFLICT(account) DO NOTHING',
+                     (account, email))
+        current = conn.execute('SELECT email FROM contacts WHERE account=?', (account,)).fetchone()
+        if current['email'] != email:
+            raise web.HTTPConflict(text='已有通知邮箱，请先解除绑定')
 
 
 def unbind_email(account):
@@ -308,6 +324,8 @@ async def api(request):
         await start_verification(account, payload)
     elif action == 'verify':
         confirm_email(account, payload)
+    elif action == 'use-registration-email':
+        use_registration_email(account)
     elif action == 'unbind':
         unbind_email(account)
     return web.json_response({'ok': True})
@@ -316,7 +334,7 @@ async def api(request):
 def routes(app):
     initialize()
     app.router.add_get(r'/api/notices/{action:contact|mine}', api)
-    app.router.add_post(r'/api/notices/{action:preview|publish|cancel|reschedule|send-code|verify|unbind}', api)
+    app.router.add_post(r'/api/notices/{action:preview|publish|cancel|reschedule|send-code|verify|use-registration-email|unbind}', api)
 
 
 def claim():

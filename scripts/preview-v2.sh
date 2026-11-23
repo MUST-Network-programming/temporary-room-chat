@@ -19,6 +19,7 @@ if [[ ${1:-} == --accounts ]]; then
     exit 1
   fi
   account_db="${PREVIEW_ACCOUNT_DB:-$ASSISTANT_STATE/accounts.sqlite3}"
+  export ACCOUNTS_DB="$account_db"
   export CHAT_INTERNAL_WS="wss://127.0.0.1:${CHAT_PORT:-8081}/ws"
   export CHAT_CA_FILE="$cert_dir/ca.crt"
   export GATEWAY_TLS_CERT="$cert_dir/server.crt" GATEWAY_TLS_KEY="$cert_dir/server.key"
@@ -30,6 +31,7 @@ elif [[ $# -ne 0 ]]; then
 fi
 export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://43.129.182.26}"
 export AI_MODE=rules ALLOW_EXTERNAL_EMAIL=0 SMTP_HOST=127.0.0.1 SMTP_PORT=1025
+export REGISTRATION_EMAIL=0
 unset SMTP_USERNAME SMTP_PASSWORD SMTP_SSL
 cmake -S . -B build >/dev/null
 cmake --build build -j2 >/dev/null

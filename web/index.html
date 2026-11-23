@@ -308,63 +308,63 @@
                 </button>
               </div>
               <p id="room-notice" class="room-notice" role="status" hidden></p>
-              <form id="message-form" class="composer">
-                <div class="composer-row">
-                  <button
-                    id="expression-toggle"
-                    class="secondary"
-                    type="button"
-                    aria-expanded="false"
-                    aria-controls="expression-options"
-                    aria-label="选择表情和贴图"
-                    title="表情与贴图"
-                  >
-                    <span data-icon="smile"></span>
-                  </button>
-                  <label class="sr-only" for="message">消息内容</label>
-                  <textarea
-                    id="message"
-                    rows="1"
-                    maxlength="2048"
-                    placeholder="输入消息…"
-                    required
-                  ></textarea>
-                  <button
-                    id="send"
-                    aria-label="发送消息"
-                    type="submit"
-                    disabled
-                  >
-                    <span>发送</span><span data-icon="send"></span>
-                  </button>
-                </div>
-                <div id="bot-mention-picker" hidden>
-                  <button id="bot-mention-option" class="secondary" type="button">@群聊助手</button>
-                </div>
-                <p class="composer-hint">
-                  <span>支持表情与贴图</span
-                  ><span>Enter 发送 · Shift + Enter 换行</span>
-                </p>
-                <div id="expression-options" hidden>
-                  <p id="emoji-label" class="expression-label">插入表情</p>
-                  <div
-                    id="emoji-options"
-                    class="expression-grid"
-                    role="group"
-                    aria-labelledby="emoji-label"
-                  ></div>
-                  <p id="sticker-label" class="expression-label">
-                    直接发送贴图
-                  </p>
-                  <div
-                    id="sticker-options"
-                    class="expression-grid"
-                    role="group"
-                    aria-labelledby="sticker-label"
-                  ></div>
-                </div>
-              </form>
             </div>
+            <form id="message-form" class="composer">
+              <div class="composer-row">
+                <button
+                  id="expression-toggle"
+                  class="secondary"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="expression-options"
+                  aria-label="选择表情和贴图"
+                  title="表情与贴图"
+                >
+                  <span data-icon="smile"></span>
+                </button>
+                <label class="sr-only" for="message">消息内容</label>
+                <textarea
+                  id="message"
+                  rows="1"
+                  maxlength="2048"
+                  placeholder="输入消息…"
+                  required
+                ></textarea>
+                <button
+                  id="send"
+                  aria-label="发送消息"
+                  type="submit"
+                  disabled
+                >
+                  <span>发送</span><span data-icon="send"></span>
+                </button>
+              </div>
+              <div id="bot-mention-picker" hidden>
+                <button id="bot-mention-option" class="secondary" type="button">@群聊助手</button>
+              </div>
+              <p class="composer-hint">
+                <span>支持表情与贴图</span
+                ><span>Enter 发送 · Shift + Enter 换行</span>
+              </p>
+              <div id="expression-options" hidden>
+                <p id="emoji-label" class="expression-label">插入表情</p>
+                <div
+                  id="emoji-options"
+                  class="expression-grid"
+                  role="group"
+                  aria-labelledby="emoji-label"
+                ></div>
+                <p id="sticker-label" class="expression-label">
+                  直接发送贴图
+                </p>
+                <div
+                  id="sticker-options"
+                  class="expression-grid"
+                  role="group"
+                  aria-labelledby="sticker-label"
+                ></div>
+              </div>
+            </form>
           </section>
           <section
             id="account-panel"
@@ -403,6 +403,21 @@
                   />
                   <button id="account-show-password" class="account-reveal" type="button" aria-label="显示密码">
                     显示
+                  </button>
+                </div>
+                <div id="email-register" class="account-row" hidden>
+                  <label for="register-email">邮箱</label>
+                  <input
+                    id="register-email"
+                    name="email"
+                    type="email"
+                    maxlength="254"
+                    autocomplete="email"
+                    autocapitalize="none"
+                    spellcheck="false"
+                  />
+                  <button id="send-register-code" class="account-code-button" type="button">
+                    发送注册码
                   </button>
                 </div>
                 <div id="invite-field" class="account-row" hidden>
@@ -458,6 +473,12 @@
       </form>
       <section id="notice-contact" class="notice-form" aria-label="通知邮箱" hidden>
         <p id="notice-contact-current"></p>
+        <div id="notice-registration-contact" class="notice-registration-contact" hidden>
+          <p id="notice-registration-address" class="field-hint"></p>
+          <button id="notice-use-registration-email" class="secondary" type="button" aria-describedby="notice-registration-address">
+            使用已验证的注册邮箱
+          </button>
+        </div>
         <p id="notice-contact-local" class="field-hint" hidden>本地预览请使用 @example.test 邮箱，并在本地收件箱查看验证码。</p>
         <form id="notice-email-form" class="notice-form">
           <div class="field">

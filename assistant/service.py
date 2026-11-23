@@ -9,12 +9,13 @@ from zoneinfo import ZoneInfo
 from aiohttp import web, ClientSession, WSMsgType
 
 if __package__:
-    from . import bot, notices
-    from .backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, model_completion
+    from . import bot, notices, registration
+    from .backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, local_mail_only, model_completion
 else:
     import bot
     import notices
-    from backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, model_completion
+    import registration
+    from backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, local_mail_only, model_completion
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = Path(os.environ.get('ASSISTANT_STATE', str(ROOT / '.local-v2')))
@@ -246,6 +247,23 @@ async def proxy_ws(request):
             await asyncio.gather(relay(front,back),relay(back,front))
     return front
 
+async def registration_policy(_request):
+    return web.json_response({
+        'email_registration': registration.enabled(),
+        'local_only': local_mail_only(),
+    })
+
+async def registration_code(request):
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({'error': '邮箱格式无效'}, status=400)
+    email = body.get('email') if isinstance(body, dict) else None
+    status, payload = await asyncio.to_thread(registration.request_registration_code,
+                                              registration.accounts_path(), email,
+                                              registration.client_ip(request))
+    return web.json_response(payload, status=status)
+
 async def static(request):
     name=request.match_info.get('file') or 'index.html'
     if name not in ('index.html','app.js','style.css'): raise web.HTTPNotFound()
@@ -344,6 +362,8 @@ def main():
         if cert:
             gateway_tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             gateway_tls.load_cert_chain(cert, key)
+        app.router.add_get('/api/register/policy', registration_policy)
+        app.router.add_post('/api/register/code', registration_code)
         app.router.add_route('*','/api/itinerary/{action}',api)
         notices.routes(app)
         app.cleanup_ctx.append(bot.background)

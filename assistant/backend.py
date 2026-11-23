@@ -57,11 +57,15 @@ def local_mail_only():
     return os.environ.get('ALLOW_EXTERNAL_EMAIL') != '1'
 
 
+def recipient_allowed(email):
+    host = os.environ.get('SMTP_HOST', '127.0.0.1')
+    return not local_mail_only() or (host in ('127.0.0.1', 'localhost') and email.endswith('@example.test'))
+
+
 def deliver(message):
     host = os.environ.get('SMTP_HOST', '127.0.0.1')
     port = int(os.environ.get('SMTP_PORT', '1025'))
-    if local_mail_only() and (host not in ('127.0.0.1', 'localhost') or
-                              not str(message['To']).endswith('@example.test')):
+    if not recipient_allowed(str(message['To'])):
         raise ValueError('已阻止外部邮件投递')
     use_ssl = os.environ.get('SMTP_SSL') == '1'
     smtp = (smtplib.SMTP_SSL(host, port, timeout=10, context=ssl.create_default_context())

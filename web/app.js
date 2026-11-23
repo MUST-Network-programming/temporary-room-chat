@@ -235,7 +235,8 @@ let account = null,
   authPending = false,
   assistantEnabled = false;
 let resumingLogin = false,
-  registering = false;
+  registering = false,
+  emailRegistration = false;
 try {
   loginToken = sessionStorage.getItem(loginKey);
 } catch (_) {}
@@ -319,7 +320,8 @@ const compactRoom = matchMedia("(max-width: 680px)");
 function showRoomInfo(expanded) {
   $("room-info").setAttribute("aria-expanded", String(expanded));
   $("room-sidebar").classList.toggle("expanded", expanded);
-  if (expanded) $("itinerary-panel").hidden = true;
+  if (expanded) closeItinerary();
+  else resizeDraft();
 }
 $("room-info").addEventListener("click", () => {
   const expanded = $("room-info").getAttribute("aria-expanded") === "true";
@@ -367,7 +369,8 @@ function resetRoom(message) {
   if (!account && noticeDialog.open) noticeDialog.close();
   hideBotMention();
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
-  $("itinerary-panel").hidden = true; $("pinned-itinerary").hidden = true;
+  closeItinerary();
+  $("pinned-itinerary").hidden = true;
   session = null;
   joined = false;
   pending = false;
@@ -467,6 +470,7 @@ function onMessage(event) {
         send({ type: "authenticate", token: loginToken });
       } else if (!authRequired) restoreRoom();
       if (!joined) showLobby();
+      loadRegistrationPolicy();
       controls();
       break;
     case "authenticated":
@@ -615,7 +619,7 @@ function onMessage(event) {
           accountError("用户名或密码有误，请检查后重试。");
           $("account-password").focus();
         } else if (data.code === "invite_invalid") {
-          accountError("注册码无效或已使用，请向组织者获取新的注册码。", "invite-code");
+          accountError("注册码无效或已使用，请核对或重新领取。", "invite-code");
         } else if (data.code === "name_taken") {
           accountError("该用户名已被使用，请换一个。", "account-name");
         } else {
@@ -722,12 +726,70 @@ function revealPassword(revealed) {
   button.textContent = revealed ? "隐藏" : "显示";
   button.setAttribute("aria-label", revealed ? "隐藏密码" : "显示密码");
 }
+function applyRegistrationPolicy() {
+  $("email-register").hidden = !registering || !emailRegistration;
+  $("account-description").textContent = !registering
+    ? "使用同行账号创建或加入临时房间。"
+    : emailRegistration
+      ? "使用邮箱领取注册码，或直接填写组织者提供的注册码。"
+      : "使用组织者提供的一次性注册码。";
+}
+async function loadRegistrationPolicy() {
+  const policySocket = socket;
+  let enabled = false;
+  if (authRequired) {
+    try {
+      const response = await fetch("/api/register/policy");
+      if (response.ok) {
+        const policy = await response.json();
+        enabled = policy.email_registration === true;
+      }
+    } catch (_) {
+      // 未启用邮箱注册服务时，仍可使用组织者发放的注册码。
+    }
+  }
+  if (socket !== policySocket) return;
+  emailRegistration = enabled;
+  applyRegistrationPolicy();
+}
+$("send-register-code").addEventListener("click", async () => {
+  const button = $("send-register-code");
+  if (!registering || !emailRegistration || button.disabled) return;
+  const field = $("register-email");
+  const email = field.value.trim();
+  if (!email || field.validity.typeMismatch) {
+    accountError("请输入有效的邮箱地址。", "register-email");
+    return;
+  }
+
+  clearAccountError();
+  notice();
+  button.disabled = true;
+  let feedback;
+  try {
+    const response = await fetch("/api/register/code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await response.json().catch(() => ({}));
+    feedback = response.ok
+      ? "如果该邮箱可以注册，验证码会发到邮箱。"
+      : data.error || "注册码未能发出。";
+  } catch (_) {
+    feedback = "注册码未能发出。";
+  } finally {
+    button.disabled = false;
+  }
+  if (registering && emailRegistration && !authPending &&
+      $("account-notice").hidden && field.value.trim() === email) {
+    notice(feedback);
+  }
+});
 function setAccountMode(signup) {
   registering = signup;
   $("account-title").textContent = signup ? "注册账号" : "登录";
-  $("account-description").textContent = signup
-    ? "使用组织者提供的一次性注册码。"
-    : "使用同行账号创建或加入临时房间。";
+  applyRegistrationPolicy();
   $("account-switch-label").textContent = signup ? "已有账号？" : "没有账号？";
   $("account-toggle").textContent = signup ? "返回登录" : "使用注册码注册";
   $("invite-field").hidden = !signup;
@@ -776,6 +838,15 @@ $("account-form").addEventListener("submit", (event) => {
       return;
     }
     request.invite = code.toLowerCase();
+    const emailField = $("register-email");
+    const email = emailField.value.trim();
+    if (emailRegistration && email) {
+      if (emailField.validity.typeMismatch) {
+        accountError("请输入有效的邮箱地址。", "register-email");
+        return;
+      }
+      request.email = email;
+    }
   }
   clearAccountError();
   notice();
@@ -996,11 +1067,19 @@ function syncItineraryLabels() {
   }
 }
 const itineraryFields = {date:"日期",meeting_time:"集合时间",meeting_place:"集合地点",destination:"目的地",transport:"交通",duration:"停留时长",regroup_time:"游览结束集合时间",regroup_place:"再次集合地点",seats:"车辆座位数",notes:"注意事项",route:"行程安排"};
+const pendingTripValue = "待确认";
 for (const [key,label] of Object.entries(itineraryFields)) {
   const el = document.createElement("label"); el.textContent = label;
   const input = document.createElement(["notes","route"].includes(key) ? "textarea" : "input");
-  input.id = "trip-" + key; input.maxLength = 400;
-  input.placeholder = key === "date" ? "YYYY-MM-DD" : key.endsWith("time") ? "HH:MM" : "待确认";
+  input.id = "trip-" + key;
+  if (key === "date") {
+    input.type = "date";
+  } else if (key === "meeting_time" || key === "regroup_time") {
+    input.type = "time";
+  } else {
+    input.maxLength = 400;
+    input.placeholder = pendingTripValue;
+  }
   if (["meeting_place","regroup_place","notes","route"].includes(key)) el.className = "wide";
   el.append(input); $("itinerary-fields").append(el);
 }
@@ -1009,13 +1088,23 @@ function openItinerary() {
   $("itinerary-panel").hidden=false; $("itinerary-toggle").setAttribute("aria-expanded","true");
   showRoomInfo(false); refreshItinerary();
 }
+function closeItinerary() {
+  $("itinerary-panel").hidden = true;
+  $("itinerary-toggle").setAttribute("aria-expanded", "false");
+  resizeDraft();
+}
 $("itinerary-toggle").addEventListener("click", () => {
   if ($("itinerary-panel").hidden) openItinerary();
-  else { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); }
+  else closeItinerary();
 });
-$("itinerary-close").addEventListener("click", () => { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); $("itinerary-toggle").focus(); });
+$("itinerary-close").addEventListener("click", () => {
+  closeItinerary();
+  $("itinerary-toggle").focus();
+});
 $("pinned-itinerary").addEventListener("click",openItinerary);
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); } });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !event.defaultPrevented && !$("itinerary-panel").hidden) closeItinerary();
+});
 async function itineraryAPI(action, body) {
   if (!assistantToken || !joined) throw new Error("请先加入房间");
   const r = await fetch("/api/itinerary/"+action,{method:body ? "POST":"GET", headers:{"Authorization":"Bearer "+assistantToken,...(body ? {"Content-Type":"application/json"}:{})},...(body ? {body:JSON.stringify(body)}:{})});
@@ -1037,7 +1126,12 @@ async function refreshItinerary(force=false) {
       $("itinerary-form").hidden=!current;
       $("itinerary-version").textContent=current ? "v"+current.version+ (current.status==="draft" ? " · 草稿，尚未发布" : " · 已确认行程") : "暂无行程";
       $("confirm-tools").hidden=!state.owner;
-      for(const name of Object.keys(itineraryFields)) { $("trip-"+name).value=current?.data[name] || ""; $("trip-"+name).readOnly=!state.owner; }
+      for (const name of Object.keys(itineraryFields)) {
+        const input = $("trip-" + name);
+        const value = current?.data[name];
+        input.value = value === pendingTripValue ? "" : (value ?? "");
+        input.readOnly = !state.owner;
+      }
       const conflicts=current?.data.conflicts || [];
       $("itinerary-conflicts").textContent=conflicts.join("；"); $("resolve-row").hidden=!state.owner || !conflicts.length; $("resolve-conflicts").checked=false;
       $("demo-reminder").checked=false; $("demo-reminder").closest("label").hidden=!state.local_only;
@@ -1072,7 +1166,10 @@ async function generateItinerary() {
 $("extract-itinerary").addEventListener("click",generateItinerary);
 function editedTrip() {
   const data={...itineraryData.data};
-  for(const key of Object.keys(itineraryFields)) data[key]=$("trip-"+key).value.trim();
+  for (const key of Object.keys(itineraryFields)) {
+    // 接口用「待确认」保存未填写的项目，表单里只把它当作提示。
+    data[key] = $("trip-" + key).value.trim() || pendingTripValue;
+  }
   if($("resolve-conflicts").checked) data.conflicts=[];
   return data;
 }
@@ -1203,6 +1300,9 @@ async function refreshContact() {
   $("notice-contact-current").textContent = contact.email ? "已绑定 " + contact.email : "尚未绑定通知邮箱";
   $("notice-contact-local").hidden = !contact.local_only;
   $("notice-unbind").hidden = !contact.email;
+  const eligibleEmail = contact.email ? "" : (contact.registration_email || "");
+  $("notice-registration-address").textContent = eligibleEmail;
+  $("notice-registration-contact").hidden = !eligibleEmail;
 }
 
 const deliveryLabels = {
@@ -1304,6 +1404,8 @@ function openNotice(view) {
     runNotice(refreshCoverage);
   } else if (view === "contact") {
     $("notice-contact-current").textContent = "正在读取绑定状态…";
+    $("notice-registration-address").textContent = "";
+    $("notice-registration-contact").hidden = true;
     $("notice-code").value = "";
     runNotice(refreshContact);
   } else {
@@ -1354,6 +1456,14 @@ $("notice-code-form").addEventListener("submit", (event) => {
     $("notice-code-form").reset();
     await refreshContact();
     noticeStatus("邮箱已验证并绑定。");
+  });
+});
+$("notice-use-registration-email").addEventListener("click", () => {
+  if ($("notice-registration-contact").hidden) return;
+  runNotice(async () => {
+    await noticeAPI("use-registration-email", {});
+    await refreshContact();
+    noticeStatus("已绑定注册邮箱。");
   });
 });
 $("notice-unbind").addEventListener("click", () => {
