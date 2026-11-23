@@ -143,7 +143,7 @@ static int schema(cJSON *j, const char *type) {
         if (!strcmp(v->string, "type")) continue;
         if ((!strcmp(type, "login") || !strcmp(type, "register")) &&
             (!strcmp(v->string, "name") || !strcmp(v->string, "password"))) continue;
-        if (!strcmp(type, "register") && !strcmp(v->string, "invite")) continue;
+        if (!strcmp(type, "register") && (!strcmp(v->string, "invite") || !strcmp(v->string, "email"))) continue;
         if (!strcmp(type, "assistant_rpc") && (!strcmp(v->string,"secret") || !strcmp(v->string,"token") || !strcmp(v->string,"text"))) continue;
         if (!strcmp(type, "authenticate") && !strcmp(v->string, "token")) continue;
         if ((!strcmp(type, "create") || !strcmp(type, "join")) && !strcmp(v->string, "nickname")) continue;
@@ -315,7 +315,9 @@ void room_message(Client *c, const char *text, size_t len) {
         send_json(c, mode);
     } else if (accounts_handle(c, j, type)) {
         const char *password = string_field(j, "password");
+        const char *invite = string_field(j, "invite");
         if (password) OPENSSL_cleanse((void *)password, strlen(password));
+        if (invite) OPENSSL_cleanse((void *)invite, strlen(invite));
         cJSON_Delete(j);
         return;
     } else if (!strcmp(type,"ping")) send_json(c,event("pong"));

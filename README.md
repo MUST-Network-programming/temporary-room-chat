@@ -103,3 +103,5 @@ Windows 可执行 `python tests/integration.py build-win/Release/chat_server.exe
 SQLite 持久保存账号和注册码使用状态。密码只保存带随机盐的 PBKDF2-SHA256 校验值。登录令牌和房间在服务重启后失效，账号仍可重新登录。服务端账号模块使用 SQLite，macOS 可用系统 SDK 提供的 SQLite，Windows 通过 vcpkg 安装。账号数据库和证书私钥由组织者保管，分发源码时不包含这些文件。
 
 在 macOS 运行 `python3 tests/accounts.py` 可复验注册码、持久化和身份恢复。
+
+默认仍是组织者在本机生成注册码。把注册码发到邮箱是单独开关，见 [[docs/邮箱注册码]]。不设置 `REGISTRATION_EMAIL=1` 时，注册页不会发信，也不接受“凭邮箱自行注册”。
