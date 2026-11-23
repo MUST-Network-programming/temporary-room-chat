@@ -74,10 +74,21 @@ async function until(fn, label) {
   throw new Error("timeout " + label);
 }
 const get = (dom, id) => dom.window.document.getElementById(id);
+const invite = "ab".repeat(16);
+
+function submitAccount(client, name) {
+  get(client.dom, "account-name").value = name;
+  get(client.dom, "account-password").value = "email-pass-2026";
+  get(client.dom, "invite-code").value = invite;
+  get(client.dom, "account-form").dispatchEvent(new client.dom.window.Event("submit", {
+    bubbles: true, cancelable: true,
+  }));
+}
 
 (async () => {
   const enabled = page({ email_registration: true, local_only: true });
   const disabled = page({ email_registration: false, local_only: true });
+  const manual = page({ email_registration: true, local_only: true });
   try {
     await until(() => get(enabled.dom, "account-panel").hidden === false, "account panel");
     get(enabled.dom, "account-toggle").click();
@@ -92,21 +103,31 @@ const get = (dom, id) => dom.window.document.getElementById(id);
     assert.equal(enabled.dom.window.document.body.textContent.includes("SHOULD_NOT_RENDER"), false);
     const posted = enabled.requests.find((item) => item.url.includes("/api/register/code"));
     assert.deepEqual(JSON.parse(posted.options.body), { email: "person@example.test" });
-    get(enabled.dom, "account-name").value = "mailuser";
-    get(enabled.dom, "account-password").value = "email-pass-2026";
-    get(enabled.dom, "invite-code").value = "abc123";
-    get(enabled.dom, "account-form").dispatchEvent(new enabled.dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    submitAccount(enabled, "mailuser");
     await until(() => get(enabled.dom, "account-panel").hidden === true, "registered");
     const registration = enabled.sockets[0].sent.find((message) => message.type === "register");
     assert.equal(registration.email, "person@example.test");
-    assert.equal(registration.invite, "abc123");
-    assert.equal(get(enabled.dom, "account-notice").textContent.includes("abc123"), false);
+    assert.equal(registration.invite, invite);
+    assert.equal(get(enabled.dom, "account-notice").textContent.includes(invite), false);
+    assert.equal(enabled.requests.some(item => item.url.includes("/api/notices/")), false);
+    await until(() => get(manual.dom, "account-panel").hidden === false, "manual signup panel");
+    get(manual.dom, "account-toggle").click();
+    await until(() => get(manual.dom, "email-register").hidden === false, "optional email field");
+    for (const [client, name] of [[manual, "manual"], [disabled, "disabled"]]) {
+      submitAccount(client, name);
+      await until(() => get(client.dom, "account-panel").hidden === true, "registered by organizer code");
+      const message = client.sockets[0].sent.find(item => item.type === "register");
+      assert.equal(message.invite, invite);
+      assert.equal(message.email, undefined);
+    }
     assert.equal(enabled.errors.length, 0);
     assert.equal(disabled.errors.length, 0);
-    console.log("PASS registration UI: opt-in email form, hidden when disabled, code field never renders a returned code");
+    assert.equal(manual.errors.length, 0);
+    console.log("PASS registration UI: email signup, organizer invites in both modes, no code exposure or implicit binding");
   } finally {
     enabled.dom.window.close();
     disabled.dom.window.close();
+    manual.dom.window.close();
   }
 })().catch((error) => {
   console.error(error);

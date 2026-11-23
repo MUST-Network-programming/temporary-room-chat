@@ -1,10 +1,11 @@
 """Opt-in registration codes delivered by SMTP.
 
 Default is off. This does not replace organizer-issued invites. A code is
-created only after the address is accepted for delivery, and it is deleted
-again if SMTP rejects the message. The code is never returned to the caller.
+removed if SMTP rejects the message. It is never returned to the caller.
 """
+from contextlib import closing
 from ipaddress import ip_address
+from pathlib import Path
 import os
 import re
 import secrets
@@ -13,6 +14,11 @@ import sqlite3
 import ssl
 import time
 from email.message import EmailMessage
+
+if __package__:
+    from .backend import deliver, recipient_allowed
+else:
+    from backend import deliver, recipient_allowed
 
 EMAIL_RE = re.compile(
     r'^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$'
@@ -44,16 +50,22 @@ def env_int(name, default, low, high):
     return max(low, min(high, value))
 
 
-def recipient_allowed(email):
-    external = os.environ.get('ALLOW_EXTERNAL_EMAIL') == '1'
-    host = os.environ.get('SMTP_HOST', '127.0.0.1')
-    if not external and (host not in ('127.0.0.1', 'localhost') or not email.endswith('@example.test')):
-        return False
-    return True
-
-
 def accounts_path():
     return os.environ.get('ACCOUNTS_DB', '')
+
+
+def verified_email(account):
+    path = accounts_path()
+    if not path:
+        return None
+    try:
+        # 只有用邮箱注册码创建的账号才会在这张表里记录已验证的邮箱。
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+            row = conn.execute('SELECT email FROM accounts WHERE name=?', (account,)).fetchone()
+    except sqlite3.Error:
+        return None
+    address = row[0] if row else None
+    return address if isinstance(address, str) and address and recipient_allowed(address) else None
 
 
 def connect(path):
@@ -109,8 +121,6 @@ def bump(conn, bucket, limit, window, now):
 
 def send_registration(email, code):
     """Transactional registration mail. Not an itinerary job and not retried."""
-    from assistant.service import deliver
-
     message = EmailMessage()
     message['From'] = os.environ.get('SMTP_FROM', 'itinerary@example.test')
     message['To'] = email

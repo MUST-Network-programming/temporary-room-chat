@@ -10,7 +10,7 @@
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到主要内容</a>
-    <div class="app-shell">
+    <div class="app-shell" id="app-shell">
       <aside class="navigation" aria-label="房间导航">
         <a class="brand" href="/" aria-label="同行聊天室首页"
           ><span class="brand-mark" aria-hidden="true">同</span
@@ -60,6 +60,10 @@
       </aside>
       <div class="workspace" id="workspace" tabindex="-1">
         <header class="topbar">
+          <div id="account-brand" class="account-brand" hidden>
+            <span class="account-mark" aria-hidden="true">同</span>
+            <span>同行</span>
+          </div>
           <div class="breadcrumb">
             <span data-icon="chat"></span><span>同行空间</span
             ><span class="slash">/</span
@@ -114,6 +118,10 @@
               </button>
             </div>
             <p id="signed-in" class="muted" hidden></p>
+            <div id="notice-account-actions" class="notice-account-actions" hidden>
+              <button id="notice-contact-open" class="secondary" type="button">通知邮箱</button>
+              <button id="notice-mine-open" class="secondary" type="button">我发布的通知</button>
+            </div>
             <div class="lobby-grid">
               <form id="entry-form" class="entry-form lobby-card">
                 <div class="card-icon" data-icon="chat"></div>
@@ -191,6 +199,7 @@
                 </p>
               </div>
               <div class="conversation-actions">
+                <button id="notice-publish-open" class="secondary" type="button" hidden>重要通知</button>
                 <button id="itinerary-toggle" class="secondary" type="button" aria-controls="itinerary-panel" aria-expanded="false">行程与提醒</button>
                 <button
                   id="room-info"
@@ -227,6 +236,7 @@
                 </button>
                 <p class="field-hint">邀请朋友加入这个房间</p>
               </div>
+              <button id="notice-room-contact" class="secondary" type="button" hidden>绑定通知邮箱</button>
               <details id="room-settings" class="room-settings">
                 <summary>房间设置</summary>
                 <div class="room-settings-body">
@@ -317,7 +327,7 @@
                   id="message"
                   rows="1"
                   maxlength="2048"
-                  placeholder="输入消息，@行程助手 提取行程…"
+                  placeholder="输入消息…"
                   required
                 ></textarea>
                 <button
@@ -328,6 +338,9 @@
                 >
                   <span>发送</span><span data-icon="send"></span>
                 </button>
+              </div>
+              <div id="bot-mention-picker" hidden>
+                <button id="bot-mention-option" class="secondary" type="button">@群聊助手</button>
               </div>
               <p class="composer-hint">
                 <span>支持表情与贴图</span
@@ -355,92 +368,140 @@
           </section>
           <section
             id="account-panel"
-            class="entry account-panel"
+            class="account-panel"
             hidden
             aria-labelledby="account-title"
           >
-            <div class="entry-heading">
-              <div>
-                <h1 id="account-title">登录聊天室</h1>
-                <p id="account-description">使用你的同行账号继续。</p>
-              </div>
-            </div>
-            <form id="account-form" class="entry-form">
-              <div class="field">
-                <label for="account-name">用户名</label>
-                <input
-                  id="account-name"
-                  autocomplete="username"
-                  required
-                  minlength="3"
-                  maxlength="24"
-                  pattern="[a-z0-9_]+"
-                  aria-describedby="account-name-hint"
-                  autocapitalize="none"
-                  spellcheck="false"
-                />
-                <p id="account-name-hint" class="field-hint">
-                  3–24 位，仅限小写英文字母、数字和下划线（_）。
-                </p>
-              </div>
-              <div class="field">
-                <label for="account-password">密码</label>
-                <input
-                  id="account-password"
-                  type="password"
-                  autocomplete="current-password"
-                  required
-                  minlength="8"
-                  maxlength="128"
-                  aria-describedby="account-password-hint"
-                />
-                <p id="account-password-hint" class="field-hint">
-                  至少 8 个字符。
-                </p>
-              </div>
-              <div id="email-register" class="field" hidden>
-                <label for="register-email">邮箱</label>
-                <div class="email-row">
+            <h1 id="account-title">登录</h1>
+            <p id="account-description">使用同行账号创建或加入临时房间。</p>
+            <form id="account-form" novalidate>
+              <fieldset id="account-fields" class="account-fields" aria-label="账号信息">
+                <div class="account-row">
+                  <label for="account-name">用户名</label>
+                  <input
+                    id="account-name"
+                    name="username"
+                    autocomplete="username"
+                    required
+                    minlength="3"
+                    maxlength="24"
+                    pattern="[a-z0-9_]+"
+                    autocapitalize="none"
+                    spellcheck="false"
+                  />
+                </div>
+                <div class="account-row">
+                  <label for="account-password">密码</label>
+                  <input
+                    id="account-password"
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                    minlength="8"
+                    maxlength="128"
+                  />
+                  <button id="account-show-password" class="account-reveal" type="button" aria-label="显示密码">
+                    显示
+                  </button>
+                </div>
+                <div id="email-register" class="account-row" hidden>
+                  <label for="register-email">邮箱</label>
                   <input
                     id="register-email"
+                    name="email"
                     type="email"
                     maxlength="254"
                     autocomplete="email"
                     autocapitalize="none"
                     spellcheck="false"
-                    aria-describedby="register-email-hint"
                   />
-                  <button id="send-register-code" class="secondary" type="button">
+                  <button id="send-register-code" class="account-code-button" type="button">
                     发送注册码
                   </button>
                 </div>
-                <p id="register-email-hint" class="field-hint">
-                  验证码只通过邮件发送，页面不会显示。未开启时仍向组织者领取注册码。
-                </p>
-              </div>
-              <div id="invite-field" class="field" hidden>
-                <label for="invite-code">一次性注册码</label>
-                <input
-                  id="invite-code"
-                  maxlength="32"
-                  autocomplete="off"
-                  autocapitalize="none"
-                  spellcheck="false"
-                  aria-describedby="invite-code-hint"
-                />
-                <p id="invite-code-hint" class="field-hint">
-                  向活动组织者领取注册码。
-                </p>
-              </div>
-              <p id="account-notice" class="notice" role="status" hidden></p>
-              <button id="account-submit" type="submit" disabled>登录</button>
-              <button id="account-toggle" class="secondary" type="button">
-                注册账号
+                <div id="invite-field" class="account-row" hidden>
+                  <label for="invite-code">注册码</label>
+                  <input
+                    id="invite-code"
+                    name="invite"
+                    maxlength="32"
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                  />
+                </div>
+              </fieldset>
+              <p id="account-notice" class="account-feedback" role="status" hidden></p>
+              <button id="account-submit" class="account-submit" type="submit" disabled>
+                <span id="account-spinner" class="account-spinner" aria-hidden="true" hidden></span>
+                <span id="account-submit-text">登录</span>
               </button>
+              <div class="account-switch">
+                <span id="account-switch-label">没有账号？</span>
+                <button id="account-toggle" type="button">使用注册码注册</button>
+              </div>
             </form>
           </section>
         </main>
       </div>
     </div>
+    <dialog id="notice-dialog" aria-labelledby="notice-dialog-title">
+      <div class="panel-heading">
+        <h2 id="notice-dialog-title"></h2>
+        <button id="notice-dialog-close" class="secondary" type="button" aria-label="关闭">✕</button>
+      </div>
+      <p id="notice-dialog-status" class="field-hint" role="status" hidden></p>
+      <form id="notice-compose" class="notice-form" hidden>
+        <div class="field">
+          <label for="notice-title">标题</label>
+          <input id="notice-title" maxlength="240" required />
+        </div>
+        <div class="field">
+          <label for="notice-body">通知正文</label>
+          <textarea id="notice-body" rows="4" maxlength="2048" required></textarea>
+        </div>
+        <div class="field">
+          <label for="notice-due">邮件发送时间（北京时间）</label>
+          <input id="notice-due" type="datetime-local" required />
+        </div>
+        <p id="notice-coverage" class="field-hint" role="status"></p>
+        <div class="form-actions">
+          <button id="notice-preview" class="secondary" type="button">刷新覆盖人数</button>
+          <button id="notice-publish" type="submit" disabled>发布并排期</button>
+        </div>
+      </form>
+      <section id="notice-contact" class="notice-form" aria-label="通知邮箱" hidden>
+        <p id="notice-contact-current"></p>
+        <div id="notice-registration-contact" class="notice-registration-contact" hidden>
+          <p id="notice-registration-address" class="field-hint"></p>
+          <button id="notice-use-registration-email" class="secondary" type="button" aria-describedby="notice-registration-address">
+            使用已验证的注册邮箱
+          </button>
+        </div>
+        <p id="notice-contact-local" class="field-hint" hidden>本地预览请使用 @example.test 邮箱，并在本地收件箱查看验证码。</p>
+        <form id="notice-email-form" class="notice-form">
+          <div class="field">
+            <label for="notice-email">邮箱地址</label>
+            <input id="notice-email" type="email" autocomplete="email" maxlength="254" required />
+          </div>
+          <div class="form-actions">
+            <button class="secondary" type="submit">发送验证码</button>
+            <button id="notice-unbind" class="secondary" type="button" hidden>解绑邮箱</button>
+          </div>
+        </form>
+        <form id="notice-code-form" class="notice-form">
+          <div class="field">
+            <label for="notice-code">六位验证码</label>
+            <input id="notice-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required />
+          </div>
+          <div class="form-actions"><button type="submit">验证并绑定</button></div>
+        </form>
+      </section>
+      <section id="notice-mine" aria-label="我发布的通知" hidden>
+        <button id="notice-refresh" class="secondary" type="button">刷新进度</button>
+        <div id="notice-list" class="notice-list"></div>
+      </section>
+    </dialog>
   </body>
 </html>

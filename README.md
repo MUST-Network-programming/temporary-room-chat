@@ -104,4 +104,31 @@ SQLite 持久保存账号和注册码使用状态。密码只保存带随机盐�
 
 在 macOS 运行 `python3 tests/accounts.py` 可复验注册码、持久化和身份恢复。
 
-默认仍是组织者在本机生成注册码。把注册码发到邮箱是单独开关，见 [[docs/邮箱注册码]]。不设置 `REGISTRATION_EMAIL=1` 时，注册页不会发信，也不接受“凭邮箱自行注册”。
+默认由组织者用 `--issue-invite` 发放注册码。将 `REGISTRATION_EMAIL` 设为 `1` 后，访客也可以申请发往邮箱的一次性注册码。C 服务与 Python 网关需要使用同一个账号数据库。详见 [邮箱注册码](docs/邮箱注册码.md)。
+
+## 群聊助手和重要通知
+
+- 在群里输入 `@` 选择「群聊助手」，再输入问题。助手参考本房间最近 20 条文本消息，回复对全房可见。`@行程助手` 继续用于提取行程草稿。
+- 在大厅或「房间信息」打开「通知邮箱」。使用邮箱注册码创建账号的成员可以主动绑定已验证的注册邮箱，其他成员或需要使用其他邮箱的成员可以输入地址并验证。房主点击「重要通知」填写标题、正文和发送时间。预览显示覆盖人数，确认后群里立即出现公告。发布时仍在房间的离线成员也计入名单，邮件发给其中已绑定通知邮箱的账号。
+- 邮件按北京时间排期。已发布的通知在房间关闭、到期或服务重启后继续有效。房主可回大厅，在「我发布的通知」查看进度，并在发送前改期或撤销。解绑邮箱会停止该账号的待发邮件。
+
+本地验收使用账号模式和 SMTP 收件箱。在项目目录运行以下命令。已有本地证书时跳过生成命令，并先信任预览 CA。
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r assistant/requirements-lock.txt
+python3 tls/make_certs.py
+./scripts/preview-v2.sh --accounts
+```
+
+另开一个终端，每位参与者各生成一个注册码。
+
+```sh
+./build/chat_server --accounts .local-v2/accounts.sqlite3 --issue-invite
+```
+
+在 [本地聊天](https://127.0.0.1:8090) 注册并绑定 `@example.test` 邮箱。在 [本地 SMTP 收件箱](http://127.0.0.1:8025) 查看验证码和到点邮件。预览模式的群聊助手返回固定演示文案。
+
+运行 `.venv/bin/python tests/bot_notices.py` 可复验 WebSocket 触发、公告和真实本地 SMTP 排期。
+
+部署时将 C 服务、Python `serve` 和单个 Python `worker` 接入现有同源网关，持续保留 `ASSISTANT_STATE`。真实模型设置 `AI_MODE=openai` 和模型接口凭证，真实邮件设置 SMTP 凭证与 `ALLOW_EXTERNAL_EMAIL=1`。配置项见 [环境变量示例](.env.example)。

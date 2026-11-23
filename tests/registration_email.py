@@ -46,6 +46,21 @@ def registration_policy():
         return json.loads(response.read().decode())
 
 
+def notice_contact(action, token=None, body=None):
+    headers = {'Authorization': f'Bearer {token}'} if token else {}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers['Content-Type'] = 'application/json'
+    request = urllib.request.Request(f'http://127.0.0.1:{API_PORT}/api/notices/{action}',
+                                     data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
+
+
 def inbox_messages(folder):
     messages = []
     for path in sorted(folder.glob('*.eml')):
@@ -151,9 +166,12 @@ def main():
         SMTP_FROM='register@example.test', ACCOUNTS_DB=str(database), ASSISTANT_STATE=str(root),
         REGISTRATION_CODE_TTL='600', REGISTRATION_RESEND_SECONDS='60', REGISTRATION_IP_LIMIT='20',
         REGISTRATION_EMAIL_LIMIT='6', REGISTRATION_LIMIT_WINDOW='600', AI_MODE='rules',
+        ASSISTANT_SHARED_SECRET='local-tests-only-' + 'f' * 32,
+        CHAT_INTERNAL_WS=f'wss://127.0.0.1:{CHAT_PORT}/ws', CHAT_CA_FILE=str(CERTS / 'ca.crt'),
     )
     env.pop('SMTP_USERNAME', None)
     env.pop('SMTP_PASSWORD', None)
+    env.pop('SMTP_SSL', None)
     python = sys.executable
     logs = {}
 
@@ -194,6 +212,7 @@ def main():
         assert wrong['type'] == 'error' and wrong['code'] == 'invite_invalid'
         created = exchange(peer, 'ownerone', code, 'owner@example.test')
         assert created['type'] == 'authenticated' and created['name'] == 'ownerone'
+        token = created['token']
         peer.close()
         replay = exchange(Peer(CHAT_PORT, context), 'ownertwo', code, 'owner@example.test')
         assert replay['type'] == 'error' and replay['code'] == 'invite_invalid'
@@ -203,6 +222,15 @@ def main():
         status, hidden = post({'email': 'owner@example.test'})
         assert status == 200 and hidden == {'ok': True}
         assert len(inbox_messages(capture_inbox)) == 1
+        assert notice_contact('contact')[0] == 401
+        assert notice_contact('contact', token) == (
+            200, {'email': None, 'registration_email': 'owner@example.test', 'local_only': True})
+        assert notice_contact('use-registration-email', token, {}) == (200, {'ok': True})
+        assert notice_contact('contact', token)[1]['email'] == 'owner@example.test'
+        assert notice_contact('use-registration-email', token, {}) == (200, {'ok': True})
+        assert len(inbox_messages(capture_inbox)) == 1
+        assert notice_contact('unbind', token, {}) == (200, {'ok': True})
+        assert notice_contact('contact', token)[1]['email'] is None
         with sqlite3.connect(database) as connection:
             assert connection.execute("SELECT count(*) FROM invites WHERE email=? AND used=0", ('owner@example.test',)).fetchone()[0] == 0
 
@@ -249,6 +277,8 @@ def main():
         assert len(invite) == 32 and invite not in Path(root / 'api.log').read_text()
         manual = exchange(Peer(CHAT_PORT, context), 'manualuser', invite)
         assert manual['type'] == 'authenticated' and manual['name'] == 'manualuser'
+        assert notice_contact('contact', manual['token'])[1]['registration_email'] is None
+        assert notice_contact('use-registration-email', manual['token'], {})[0] == 400
 
         status, fresh = post({'email': 'race@example.test'})
         assert status == 200 and fresh == {'ok': True}
@@ -284,6 +314,7 @@ def main():
         )
         print('PASS email registration: success, wrong code, expiry, replay, cooldown, resend invalidation, '
               'existing address hidden, organizer invite, concurrent consume, anonymous chat')
+        print('PASS authenticated opt-in contact reuse, no verification email, unbind, and manual invitations')
     finally:
         for process in (capture, api, chat, anonymous):
             if process.poll() is None:

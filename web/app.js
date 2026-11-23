@@ -232,9 +232,11 @@ const loginKey = "temporary-chat-account";
 let account = null,
   loginToken = null,
   authRequired = null,
-  authPending = false;
+  authPending = false,
+  assistantEnabled = false;
 let resumingLogin = false,
-  registering = false;
+  registering = false,
+  emailRegistration = false;
 try {
   loginToken = sessionStorage.getItem(loginKey);
 } catch (_) {}
@@ -247,7 +249,9 @@ function saveLogin(token) {
 }
 function showLobby() {
   const allowed = authRequired === false || Boolean(account);
-  $("account-panel").hidden = authRequired !== true || allowed;
+  const accountScreen = authRequired === true && !allowed && $("room-view").hidden;
+  $("account-panel").hidden = $("account-brand").hidden = !accountScreen;
+  $("app-shell").classList.toggle("is-account", accountScreen);
   $("lobby").hidden = !allowed || !$("room-view").hidden;
   $("nickname-field").hidden = authRequired !== false;
   $("join-description").textContent =
@@ -255,6 +259,7 @@ function showLobby() {
       ? "输入朋友分享的房间码，继续你们的对话。"
       : "输入昵称和6位房间码。";
   $("logout").hidden = $("signed-in").hidden = !account;
+  $("notice-account-actions").hidden = !account || !assistantEnabled;
   $("signed-in").textContent = account ? "当前账号 " + account : "";
   syncWorkspace();
 }
@@ -336,6 +341,12 @@ function controls() {
   const online = socket && socket.readyState === WebSocket.OPEN;
   const allowed = authRequired === false || Boolean(account);
   $("account-submit").disabled = !online || authPending;
+  $("account-fields").disabled = $("account-toggle").disabled = authPending;
+  $("account-form").setAttribute("aria-busy", String(authPending));
+  $("account-spinner").hidden = !authPending;
+  $("account-submit-text").textContent = authPending
+    ? (resumingLogin ? "正在恢复登录" : registering ? "正在注册…" : "正在登录…")
+    : (registering ? "注册并登录" : "登录");
   $("create").disabled = $("join").disabled = !online || !allowed || pending;
   $("send").disabled = !online || !joined || !$("message").value.trim();
   $("rename").disabled = !online || !joined;
@@ -353,6 +364,10 @@ function send(data) {
   return true;
 }
 function resetRoom(message) {
+  if (noticeView === "publish" && noticeDialog.open) noticeDialog.close();
+  resetNoticeDraft();
+  if (!account && noticeDialog.open) noticeDialog.close();
+  hideBotMention();
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
   closeItinerary();
   $("pinned-itinerary").hidden = true;
@@ -447,22 +462,23 @@ function onMessage(event) {
   switch (data.type) {
     case "auth_mode":
       authRequired = data.required;
+      assistantEnabled = data.assistant_enabled === true;
+      $("message").placeholder = assistantEnabled ? "输入消息，@群聊助手 提问…" : "输入消息…";
       if (authRequired && loginToken) {
         resumingLogin = true;
         authPending = true;
         send({ type: "authenticate", token: loginToken });
       } else if (!authRequired) restoreRoom();
       if (!joined) showLobby();
-      if (authRequired) loadRegistrationPolicy();
-      else applyRegistrationMode();
+      loadRegistrationPolicy();
       controls();
       break;
     case "authenticated":
       const shouldRestore = resumingLogin && session?.nickname === data.name;
-      $("invite-code").value = "";
-      $("register-email").value = "";
       account = data.name;
       authPending = resumingLogin = false;
+      $("account-form").reset();
+      setAccountMode(false);
       saveLogin(data.token);
       if (shouldRestore) restoreRoom();
       else if (session) {
@@ -484,6 +500,7 @@ function onMessage(event) {
       restoring = false;
       attempts = 0;
       persist();
+      noticeCards.clear();
       $("lobby").hidden = true;
       $("room-view").hidden = false;
       $("room-id").textContent = data.room;
@@ -493,6 +510,8 @@ function onMessage(event) {
       $("expiry").textContent =
         `房间到期：${new Date(data.expires * 1000).toLocaleString("zh-CN")}`;
       $("rename").hidden = !data.owner;
+      $("notice-publish-open").hidden = !account || !data.owner || !assistantEnabled;
+      $("notice-room-contact").hidden = !account || !assistantEnabled;
       setRoomName(data.name || "同行房间");
       followingLatest = true;
       latestButton.hidden = true;
@@ -538,6 +557,12 @@ function onMessage(event) {
       const name = document.createElement("p");
       name.className = "message-name";
       name.textContent = data.nickname;
+      if (data.bot === true) {
+        const badge = document.createElement("span");
+        badge.className = "bot-badge";
+        badge.textContent = "机器人";
+        name.append(badge);
+      }
       const text = document.createElement("p");
       text.className = "message-text";
       text.textContent =
@@ -568,6 +593,9 @@ function onMessage(event) {
       if (data.nickname === "行程助手") refreshItinerary();
       break;
     }
+    case "notice":
+      displayNoticeCard(data);
+      break;
     case "closed":
       resetRoom(
         data.reason === "left"
@@ -586,8 +614,17 @@ function onMessage(event) {
         resetRoom(data.message);
       } else if (authPending) {
         authPending = resumingLogin = false;
-        notice(data.message);
         controls();
+        if (data.code === "login_invalid") {
+          accountError("用户名或密码有误，请检查后重试。");
+          $("account-password").focus();
+        } else if (data.code === "invite_invalid") {
+          accountError("注册码无效或已使用，请核对或重新领取。", "invite-code");
+        } else if (data.code === "name_taken") {
+          accountError("该用户名已被使用，请换一个。", "account-name");
+        } else {
+          accountError(data.message);
+        }
       } else if (data.code === "session_replaced")
         resetRoom("此会话已在另一连接恢复，请重新加入。");
       else if (restoring)
@@ -627,6 +664,7 @@ function connect() {
     /* close 事件统一安排重连，避免重复计时器。 */
   };
   socket.onclose = () => {
+    const interruptedLogin = authPending && !resumingLogin;
     clearInterval(heartbeatTimer);
     joined = false;
     pending = false;
@@ -636,6 +674,7 @@ function connect() {
     const base = Math.min(15000, 1000 * 2 ** Math.min(attempts++, 5));
     const delay = Math.min(15000, base * (0.8 + Math.random() * 0.4));
     connection(`连接中断，${Math.ceil(delay / 1000)} 秒后重试`);
+    if (interruptedLogin) accountError("连接中断。恢复连接后，请重新提交。");
     retryTimer = setTimeout(connect, delay);
   };
 }
@@ -666,38 +705,67 @@ function enter(type) {
   }
   controls();
 }
-let emailRegistration = false;
-function applyRegistrationMode() {
-  const show = registering && emailRegistration;
-  $("email-register").hidden = !show;
-  $("register-email").required = show;
-  $("invite-code-hint").textContent = emailRegistration
-    ? "注册码只发到邮箱，页面不会显示。未开启邮箱注册时，仍向组织者领取。"
-    : "向活动组织者领取注册码。";
+function clearAccountError() {
+  const field = $("account-fields").querySelector('[aria-invalid="true"]');
+  if (!field) return;
+  field.removeAttribute("aria-invalid");
+  field.removeAttribute("aria-describedby");
+}
+function accountError(message, fieldId) {
+  clearAccountError();
+  notice(message);
+  if (!fieldId) return;
+  const field = $(fieldId);
+  field.setAttribute("aria-invalid", "true");
+  field.setAttribute("aria-describedby", "account-notice");
+  field.focus();
+}
+function revealPassword(revealed) {
+  $("account-password").type = revealed ? "text" : "password";
+  const button = $("account-show-password");
+  button.textContent = revealed ? "隐藏" : "显示";
+  button.setAttribute("aria-label", revealed ? "隐藏密码" : "显示密码");
+}
+function applyRegistrationPolicy() {
+  $("email-register").hidden = !registering || !emailRegistration;
+  $("account-description").textContent = !registering
+    ? "使用同行账号创建或加入临时房间。"
+    : emailRegistration
+      ? "使用邮箱领取注册码，或直接填写组织者提供的注册码。"
+      : "使用组织者提供的一次性注册码。";
 }
 async function loadRegistrationPolicy() {
-  emailRegistration = false;
-  try {
-    const response = await fetch("/api/register/policy");
-    if (response.ok) {
-      const data = await response.json();
-      emailRegistration = data.email_registration === true;
+  const policySocket = socket;
+  let enabled = false;
+  if (authRequired) {
+    try {
+      const response = await fetch("/api/register/policy");
+      if (response.ok) {
+        const policy = await response.json();
+        enabled = policy.email_registration === true;
+      }
+    } catch (_) {
+      // 未启用邮箱注册服务时，仍可使用组织者发放的注册码。
     }
-  } catch (_) {
-    emailRegistration = false;
   }
-  applyRegistrationMode();
+  if (socket !== policySocket) return;
+  emailRegistration = enabled;
+  applyRegistrationPolicy();
 }
 $("send-register-code").addEventListener("click", async () => {
-  const email = $("register-email").value.trim();
   const button = $("send-register-code");
-  if (!emailRegistration) return;
-  if (!email) {
-    notice("请填写接收注册码的邮箱。");
-    $("register-email").focus();
+  if (!registering || !emailRegistration || button.disabled) return;
+  const field = $("register-email");
+  const email = field.value.trim();
+  if (!email || field.validity.typeMismatch) {
+    accountError("请输入有效的邮箱地址。", "register-email");
     return;
   }
+
+  clearAccountError();
+  notice();
   button.disabled = true;
+  let feedback;
   try {
     const response = await fetch("/api/register/code", {
       method: "POST",
@@ -705,60 +773,88 @@ $("send-register-code").addEventListener("click", async () => {
       body: JSON.stringify({ email }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      notice(data.error || "注册码未能发出");
-      return;
-    }
-    notice("如果该邮箱可以注册，验证码会发到邮箱。邮件里的注册码不会出现在本页。");
+    feedback = response.ok
+      ? "如果该邮箱可以注册，验证码会发到邮箱。"
+      : data.error || "注册码未能发出。";
   } catch (_) {
-    notice("注册码未能发出");
+    feedback = "注册码未能发出。";
   } finally {
     button.disabled = false;
   }
+  if (registering && emailRegistration && !authPending &&
+      $("account-notice").hidden && field.value.trim() === email) {
+    notice(feedback);
+  }
 });
+function setAccountMode(signup) {
+  registering = signup;
+  $("account-title").textContent = signup ? "注册账号" : "登录";
+  applyRegistrationPolicy();
+  $("account-switch-label").textContent = signup ? "已有账号？" : "没有账号？";
+  $("account-toggle").textContent = signup ? "返回登录" : "使用注册码注册";
+  $("invite-field").hidden = !signup;
+  $("invite-code").required = signup;
+  $("account-password").autocomplete = signup ? "new-password" : "current-password";
+  $("account-password").value = "";
+  clearAccountError();
+  revealPassword(false);
+  controls();
+}
 $("account-toggle").addEventListener("click", () => {
-  registering = !registering;
-  $("account-title").textContent = registering ? "注册账号" : "登录聊天室";
-  $("account-description").textContent = registering
-    ? "用一次性注册码创建同行账号。"
-    : "使用你的同行账号继续。";
-  $("account-submit").textContent = registering ? "注册并登录" : "登录";
-  $("account-toggle").textContent = registering
-    ? "已有账号，去登录"
-    : "注册账号";
-  $("invite-field").hidden = !registering;
-  $("invite-code").required = registering;
-  applyRegistrationMode();
-  $("account-password").autocomplete = registering
-    ? "new-password"
-    : "current-password";
+  setAccountMode(!registering);
   notice();
+  $("account-name").focus();
+});
+$("account-show-password").addEventListener("click", () => {
+  revealPassword($("account-password").type === "password");
+});
+$("account-form").addEventListener("input", () => {
+  clearAccountError();
+  if (!$("account-notice").hidden) notice();
 });
 $("account-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if ($("account-submit").disabled) return;
   if (location.protocol !== "https:") {
     notice("请通过 HTTPS 登录。");
     return;
   }
+  const name = $("account-name").value.trim();
+  if (!/^[a-z0-9_]{3,24}$/.test(name)) {
+    accountError("用户名需要 3–24 位小写字母、数字或下划线。", "account-name");
+    return;
+  }
   const password = $("account-password").value;
-  const request = {
-    type: registering ? "register" : "login",
-    name: $("account-name").value.trim(),
-    password,
-  };
+  const passwordBytes = bytes(password);
+  if (passwordBytes < 8 || passwordBytes > 128) {
+    accountError("密码需要 8–128 个字节。", "account-password");
+    return;
+  }
+  const request = { type: registering ? "register" : "login", name, password };
   if (registering) {
-    request.invite = $("invite-code").value.trim();
-    if (emailRegistration) {
-      const email = $("register-email").value.trim();
-      if (!email) {
-        notice("请填写接收注册码的邮箱。");
+    const code = $("invite-code").value.trim();
+    if (!/^[a-f0-9]{32}$/i.test(code)) {
+      accountError("请输入完整的 32 位注册码。", "invite-code");
+      return;
+    }
+    request.invite = code.toLowerCase();
+    const emailField = $("register-email");
+    const email = emailField.value.trim();
+    if (emailRegistration && email) {
+      if (emailField.validity.typeMismatch) {
+        accountError("请输入有效的邮箱地址。", "register-email");
         return;
       }
       request.email = email;
     }
   }
+  clearAccountError();
+  notice();
   authPending = send(request);
-  if (authPending) $("account-password").value = "";
+  if (authPending) {
+    $("account-password").value = "";
+    revealPassword(false);
+  }
   controls();
 });
 $("logout").addEventListener("click", () => {
@@ -788,30 +884,42 @@ $("message-form").addEventListener("submit", (e) => {
     }
     scrollToLatest();
     $("message").value = "";
+    hideBotMention();
     draftChanged();
     showExpressions(false);
     notice();
     $("message").focus({ preventScroll: true });
   }
 });
-$("message").addEventListener("input", draftChanged);
+$("message").addEventListener("input", () => {
+  draftChanged();
+  updateBotMention();
+});
 window.addEventListener("resize", resizeDraft);
 $("message").addEventListener("keydown", (event) => {
+  if (mentionRange && !event.isComposing && ["Tab", "Enter", "Escape"].includes(event.key) && !event.shiftKey) {
+    event.preventDefault();
+    if (event.key === "Escape") hideBotMention();
+    else insertBotMention();
+    return;
+  }
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     if (!$("send").disabled) $("message-form").requestSubmit();
   }
 });
 $("leave").addEventListener("click", () => {
+  const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
   if (
     !$("close-room").hidden &&
-    !confirm("你是房主。离开会关闭房间，所有人都将退出。确认离开？")
+    !confirm(`你是房主。离开会关闭房间，所有人都将退出。${scheduled}确认离开？`)
   )
     return;
   if (send({ type: "leave" })) resetRoom("已离开房间。");
 });
 $("close-room").addEventListener("click", () => {
-  if (confirm("关闭后所有成员都会退出，加入码立即失效。确认关闭？"))
+  const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
+  if (confirm(`关闭后所有成员都会退出，加入码立即失效。${scheduled}确认关闭？`))
     send({ type: "close" });
 });
 $("copy-code").addEventListener("click", async () => {
@@ -995,7 +1103,7 @@ $("itinerary-close").addEventListener("click", () => {
 });
 $("pinned-itinerary").addEventListener("click",openItinerary);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("itinerary-panel").hidden) closeItinerary();
+  if (event.key === "Escape" && !event.defaultPrevented && !$("itinerary-panel").hidden) closeItinerary();
 });
 async function itineraryAPI(action, body) {
   if (!assistantToken || !joined) throw new Error("请先加入房间");
@@ -1075,4 +1183,295 @@ $("itinerary-form").addEventListener("submit",e=>{ e.preventDefault(); if(!itine
 $("subscription-form").addEventListener("submit",e=>{e.preventDefault();itineraryAction(async()=>{await itineraryAPI("subscribe",{active:true,email:$("subscriber-email").value.trim()});});});
 $("unsubscribe").addEventListener("click",()=>itineraryAction(async()=>{await itineraryAPI("subscribe",{active:false});}));
 setInterval(()=>refreshItinerary(),3000);
+
+const botMention = "@群聊助手";
+let mentionRange = null;
+
+function hideBotMention() {
+  mentionRange = null;
+  $("bot-mention-picker").hidden = true;
+}
+
+function updateBotMention() {
+  const input = $("message");
+  const end = input.selectionStart;
+  const match = /(?:^|[\s，：、])([@＠][^\s@＠]*)$/.exec(input.value.slice(0, end));
+  if (!assistantEnabled || !joined || !match || !botMention.startsWith("@" + match[1].slice(1))) {
+    hideBotMention();
+    return;
+  }
+  mentionRange = [end - match[1].length, end];
+  $("bot-mention-picker").hidden = false;
+}
+
+function insertBotMention() {
+  if (!mentionRange) return;
+  const input = $("message");
+  input.setRangeText(botMention + " ", ...mentionRange, "end");
+  hideBotMention();
+  draftChanged();
+  input.focus();
+}
+$("bot-mention-option").addEventListener("click", insertBotMention);
+
+const noticeDialog = $("notice-dialog");
+const noticeCards = new Map();
+let noticeView = "", noticeBusy = false, noticeRequestId = "";
+
+function displayNoticeCard(data) {
+  let card = noticeCards.get(data.id);
+  if (card && Number(card.dataset.revision) >= data.revision) return;
+  const isNew = !card;
+  if (isNew) {
+    card = document.createElement("article");
+    card.className = "important-notice-card";
+    noticeCards.set(data.id, card);
+  }
+  card.dataset.revision = data.revision;
+  const tag = document.createElement("small");
+  tag.textContent = data.status === "cancelled" ? "重要通知 · 已撤销" : "重要通知";
+  const title = document.createElement("h3");
+  title.textContent = data.title;
+  const body = document.createElement("p");
+  body.textContent = data.text;
+  const timing = document.createElement("small");
+  if (data.status !== "cancelled") timing.textContent = "邮件排期 " + shanghaiTime(Date.parse(data.due) / 1000);
+  card.replaceChildren(tag, title, body, timing);
+  if (isNew) appendMessage(card);
+}
+
+async function noticeAPI(action, payload, room = false) {
+  const token = loginToken;
+  if (!token || !account) throw new Error("请先登录账号");
+  const headers = { Authorization: "Bearer " + token };
+  if (payload) headers["Content-Type"] = "application/json";
+  if (room) headers["X-Room-Token"] = assistantToken;
+  const response = await fetch("/api/notices/" + action, {
+    method: payload ? "POST" : "GET",
+    headers,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+  if (token !== loginToken) throw new Error("账号已切换");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "通知服务暂不可用");
+  return data;
+}
+
+function noticeStatus(text = "") {
+  $("notice-dialog-status").textContent = text;
+  $("notice-dialog-status").hidden = !text;
+}
+
+async function runNotice(action) {
+  if (noticeBusy) return;
+  noticeBusy = true;
+  noticeStatus();
+  noticeDialog.setAttribute("aria-busy", "true");
+  try {
+    await action();
+  } catch (error) {
+    if (noticeDialog.open) noticeStatus(error.message);
+  } finally {
+    noticeBusy = false;
+    noticeDialog.removeAttribute("aria-busy");
+  }
+}
+
+function shanghaiInput(timestamp) {
+  const fixedOffset = 8 * 60 * 60 * 1000;
+  return new Date(timestamp + fixedOffset).toISOString().slice(0, 16);
+}
+
+async function refreshCoverage() {
+  $("notice-publish").disabled = true;
+  $("notice-coverage").textContent = "正在统计覆盖人数…";
+  try {
+    const counts = await noticeAPI("preview", {}, true);
+    $("notice-coverage").textContent = `房间 ${counts.members} 人 · 邮件 ${counts.recipients} 人 · 暂无可用邮箱 ${counts.members - counts.recipients} 人`;
+    $("notice-publish").disabled = false;
+  } catch (error) {
+    $("notice-coverage").textContent = "";
+    throw error;
+  }
+}
+
+async function refreshContact() {
+  const contact = await noticeAPI("contact");
+  $("notice-contact-current").textContent = contact.email ? "已绑定 " + contact.email : "尚未绑定通知邮箱";
+  $("notice-contact-local").hidden = !contact.local_only;
+  $("notice-unbind").hidden = !contact.email;
+  const eligibleEmail = contact.email ? "" : (contact.registration_email || "");
+  $("notice-registration-address").textContent = eligibleEmail;
+  $("notice-registration-contact").hidden = !eligibleEmail;
+}
+
+const deliveryLabels = {
+  pending: "待发送",
+  sending: "发送中",
+  sent: "邮件服务器已接受",
+  failed: "发送失败",
+  uncertain: "结果待确认",
+  cancelled: "已撤销",
+  skipped: "已跳过",
+};
+
+function manageNotice(item) {
+  const form = document.createElement("form");
+  form.className = "notice-form";
+  const label = document.createElement("label");
+  const time = document.createElement("input");
+  time.type = "datetime-local";
+  time.value = item.due.slice(0, 16);
+  time.required = true;
+  time.id = "due-" + item.id;
+  label.htmlFor = time.id;
+  label.textContent = "新发送时间（北京时间）";
+  const actions = document.createElement("div");
+  actions.className = "form-actions";
+  const reschedule = document.createElement("button");
+  reschedule.className = "secondary";
+  reschedule.type = "submit";
+  reschedule.textContent = "保存改期";
+  const cancel = document.createElement("button");
+  cancel.className = "secondary";
+  cancel.type = "button";
+  cancel.textContent = "撤销通知";
+  actions.append(reschedule, cancel);
+  form.append(label, time, actions);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runNotice(async () => {
+      await noticeAPI("reschedule", { id: item.id, due: time.value });
+      await refreshMine();
+      noticeStatus("已更新发送时间。");
+    });
+  });
+  cancel.addEventListener("click", () => {
+    if (!confirm("撤销这条通知？待发邮件将取消。")) return;
+    runNotice(async () => {
+      await noticeAPI("cancel", { id: item.id });
+      await refreshMine();
+      noticeStatus("已撤销通知。");
+    });
+  });
+  return form;
+}
+
+async function refreshMine() {
+  const data = await noticeAPI("mine");
+  if (!data.notices.length) {
+    $("notice-list").textContent = "你还没有发布过重要通知。";
+    return;
+  }
+  $("notice-list").replaceChildren(...data.notices.map((item) => {
+    const card = document.createElement("article");
+    const title = document.createElement("h3");
+    title.textContent = item.title;
+    const body = document.createElement("p");
+    body.className = "notice-list-body";
+    body.textContent = item.body;
+    const timing = document.createElement("p");
+    timing.className = "field-hint";
+    const due = Date.parse(item.due);
+    timing.textContent = `${item.room_name} · ${shanghaiTime(due / 1000)}`;
+    const delivery = document.createElement("p");
+    delivery.className = "field-hint";
+    const counts = Object.entries(item.deliveries).map(([status, total]) => `${deliveryLabels[status]} ${total}`);
+    if (item.status === "cancelled" && !item.recipients) counts.push("已撤销");
+    if (!item.recipients) counts.push("无邮件收件人");
+    if (item.members > item.recipients) counts.push(`发布时未覆盖 ${item.members - item.recipients} 人`);
+    delivery.textContent = counts.join(" · ");
+    card.append(title, body, timing, delivery);
+    if (item.status === "scheduled" && due > Date.now()) card.append(manageNotice(item));
+    return card;
+  }));
+}
+
+function openNotice(view) {
+  if (noticeBusy) return;
+  noticeView = view;
+  const titles = { publish: "发布重要通知", contact: "通知邮箱", mine: "我发布的通知" };
+  $("notice-dialog-title").textContent = titles[view];
+  $("notice-compose").hidden = view !== "publish";
+  $("notice-contact").hidden = view !== "contact";
+  $("notice-mine").hidden = view !== "mine";
+  if (!noticeDialog.open) noticeDialog.showModal();
+  if (view === "publish") {
+    if (!noticeRequestId) {
+      noticeRequestId = crypto.randomUUID().replace(/-/g, "");
+      $("notice-due").value = shanghaiInput(Date.now() + 5 * 60 * 1000);
+    }
+    runNotice(refreshCoverage);
+  } else if (view === "contact") {
+    $("notice-contact-current").textContent = "正在读取绑定状态…";
+    $("notice-registration-address").textContent = "";
+    $("notice-registration-contact").hidden = true;
+    $("notice-code").value = "";
+    runNotice(refreshContact);
+  } else {
+    $("notice-list").textContent = "正在读取发送进度…";
+    runNotice(refreshMine);
+  }
+}
+
+function resetNoticeDraft() {
+  noticeRequestId = "";
+  $("notice-compose").reset();
+}
+
+$("notice-dialog-close").addEventListener("click", () => noticeDialog.close());
+$("notice-publish-open").addEventListener("click", () => openNotice("publish"));
+$("notice-room-contact").addEventListener("click", () => openNotice("contact"));
+$("notice-contact-open").addEventListener("click", () => openNotice("contact"));
+$("notice-mine-open").addEventListener("click", () => openNotice("mine"));
+$("notice-preview").addEventListener("click", () => runNotice(refreshCoverage));
+$("notice-refresh").addEventListener("click", () => runNotice(refreshMine));
+$("notice-compose").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const payload = {
+    title: $("notice-title").value.trim(),
+    body: $("notice-body").value.trim(),
+    due: $("notice-due").value,
+    request_id: noticeRequestId,
+  };
+  runNotice(async () => {
+    await noticeAPI("publish", payload, true);
+    resetNoticeDraft();
+    if (noticeDialog.open) noticeDialog.close();
+    if (joined) notice("重要通知已发布并排期。");
+  });
+});
+$("notice-email-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runNotice(async () => {
+    await noticeAPI("send-code", { email: $("notice-email").value.trim() });
+    noticeStatus("验证码已发送，请查看收件箱。");
+    $("notice-code").focus();
+  });
+});
+$("notice-code-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runNotice(async () => {
+    await noticeAPI("verify", { code: $("notice-code").value.trim() });
+    $("notice-code-form").reset();
+    await refreshContact();
+    noticeStatus("邮箱已验证并绑定。");
+  });
+});
+$("notice-use-registration-email").addEventListener("click", () => {
+  if ($("notice-registration-contact").hidden) return;
+  runNotice(async () => {
+    await noticeAPI("use-registration-email", {});
+    await refreshContact();
+    noticeStatus("已绑定注册邮箱。");
+  });
+});
+$("notice-unbind").addEventListener("click", () => {
+  if (!confirm("解绑邮箱后，此账号待发送的重要通知邮件会取消。确认解绑？")) return;
+  runNotice(async () => {
+    await noticeAPI("unbind", {});
+    await refreshContact();
+    noticeStatus("邮箱已解绑。");
+  });
+});
 connect();
