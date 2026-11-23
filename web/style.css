@@ -56,6 +56,10 @@
 }
 
 @media (max-width: 900px) {
+  #expression-options {
+    z-index: 25;
+  }
+
   .room-sidebar,
   .itinerary-panel {
     grid-area: 2 / 1;
