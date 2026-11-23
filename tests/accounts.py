@@ -84,7 +84,7 @@ def main():
             a.send({'type': 'login', 'name': 'alice', 'password': PASSWORD})
             assert a.until('authenticated')['name'] == 'alice'
             a.send({'type': 'join', 'room': room})
-            expect_error(a, 'room_not_found')
+            assert a.until('joined')['owner']
             b.send({'type': 'register', 'name': 'bob', 'password': PASSWORD, 'invite': invite})
             expect_error(b, 'invite_invalid')
             a.close(); b.close()

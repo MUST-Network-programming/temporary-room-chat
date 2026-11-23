@@ -364,6 +364,7 @@ function send(data) {
   return true;
 }
 function resetRoom(message) {
+  noticeCards.clear();
   if (noticeView === "publish" && noticeDialog.open) noticeDialog.close();
   resetNoticeDraft();
   if (!account && noticeDialog.open) noticeDialog.close();
@@ -371,6 +372,8 @@ function resetRoom(message) {
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
   closeItinerary();
   $("pinned-itinerary").hidden = true;
+  messageList.replaceChildren(olderButton);
+  showHistoryButton("");
   session = null;
   joined = false;
   pending = false;
@@ -391,7 +394,22 @@ function resetRoom(message) {
 }
 const messageList = $("messages");
 const latestButton = $("latest");
+const olderButton = $("older-messages");
 let followingLatest = true;
+let historyBefore = "";
+
+function showHistoryButton(before) {
+  historyBefore = before || "";
+  olderButton.hidden = !historyBefore;
+  olderButton.disabled = false;
+  olderButton.textContent = "加载更早的消息";
+}
+
+olderButton.addEventListener("click", () => {
+  if (!historyBefore || !send({ type: "history", before: historyBefore })) return;
+  olderButton.disabled = true;
+  olderButton.textContent = "正在加载…";
+});
 
 function scrollToLatest() {
   followingLatest = true;
@@ -420,17 +438,8 @@ function syncConversationIntro() {
   );
 }
 function appendMessage(node) {
-  // 阅读旧消息时保留位置，清理最早的 DOM 节点也不改变正在读的内容。
   messageList.append(node);
   syncConversationIntro();
-  while (messageList.children.length > 500) {
-    const previousHeight = messageList.scrollHeight;
-    const previousTop = messageList.scrollTop;
-    messageList.firstElementChild.remove();
-    if (!followingLatest)
-      messageList.scrollTop =
-        previousTop - (previousHeight - messageList.scrollHeight);
-  }
   if (followingLatest) scrollToLatest();
   else latestButton.hidden = false;
 }
@@ -450,6 +459,58 @@ function makeAvatar(name, className) {
   avatar.setAttribute("aria-hidden", "true");
   return avatar;
 }
+function chatArticle(data) {
+  const article = document.createElement("article");
+  article.className = `chat-message${session && data.nickname === session.nickname ? " own" : ""}`;
+  const name = document.createElement("p");
+  name.className = "message-name";
+  name.textContent = data.nickname;
+  if (data.bot === true) {
+    const badge = document.createElement("span");
+    badge.className = "bot-badge";
+    badge.textContent = "机器人";
+    name.append(badge);
+  }
+  const text = document.createElement("p");
+  text.className = "message-text";
+  text.textContent = data.type === "sticker" ? stickers[data.id] : data.text;
+  if (data.type === "sticker") {
+    text.classList.add("sticker-message");
+    text.setAttribute("aria-label", stickerNames[data.id] || "贴图");
+  }
+  const body = document.createElement("div");
+  body.className = "message-body";
+  body.append(name, text);
+  if (data.nickname === "行程助手" && data.type === "chat") {
+    const version = itineraryVersionOf(data.text);
+    if (version != null) {
+      const label = document.createElement("p");
+      label.className = "itinerary-version-label";
+      body.insertBefore(label, text);
+      article.classList.add("itinerary-announcement");
+      article.dataset.itineraryVersion = String(version);
+    }
+  }
+  article.append(makeAvatar(data.nickname, "message-avatar"), body);
+  return article;
+}
+
+function prependHistory(messages, before) {
+  const anchor = messageList.querySelector(".chat-message, .important-notice-card");
+  const offset = anchor?.getBoundingClientRect().top;
+  const page = document.createDocumentFragment();
+  for (const message of messages) {
+    if (message.type === "notice") displayNoticeCard(message, page);
+    else page.append(chatArticle(message));
+  }
+  if (anchor) anchor.before(page);
+  else messageList.append(page);
+  showHistoryButton(before);
+  if (anchor) messageList.scrollTop += anchor.getBoundingClientRect().top - offset;
+  syncConversationIntro();
+  syncItineraryLabels();
+}
+
 function onMessage(event) {
   let data;
   try {
@@ -515,7 +576,8 @@ function onMessage(event) {
       setRoomName(data.name || "同行房间");
       followingLatest = true;
       latestButton.hidden = true;
-      messageList.replaceChildren();
+      messageList.replaceChildren(olderButton);
+      showHistoryButton(data.history_before);
       syncConversationIntro();
       systemMessage(
         wasRestoring
@@ -550,42 +612,12 @@ function onMessage(event) {
     case "renamed":
       if (session) setRoomName(data.name);
       break;
+    case "history":
+      if (joined && olderButton.disabled) prependHistory(data.messages, data.before);
+      break;
     case "sticker":
     case "chat": {
-      const article = document.createElement("article");
-      article.className = `chat-message${session && data.nickname === session.nickname ? " own" : ""}`;
-      const name = document.createElement("p");
-      name.className = "message-name";
-      name.textContent = data.nickname;
-      if (data.bot === true) {
-        const badge = document.createElement("span");
-        badge.className = "bot-badge";
-        badge.textContent = "机器人";
-        name.append(badge);
-      }
-      const text = document.createElement("p");
-      text.className = "message-text";
-      text.textContent =
-        data.type === "sticker" ? stickers[data.id] : data.text;
-      if (data.type === "sticker") {
-        text.classList.add("sticker-message");
-        text.setAttribute("aria-label", stickerNames[data.id] || "贴图");
-      }
-      const body = document.createElement("div");
-      body.className = "message-body";
-      body.append(name, text);
-      if (data.nickname === "行程助手" && data.type === "chat") {
-        const version = itineraryVersionOf(data.text);
-        if (version != null) {
-          const label = document.createElement("p");
-          label.className = "itinerary-version-label";
-          body.insertBefore(label, text);
-          article.classList.add("itinerary-announcement");
-          article.dataset.itineraryVersion = String(version);
-        }
-      }
-      article.append(makeAvatar(data.nickname, "message-avatar"), body);
-      appendMessage(article);
+      appendMessage(chatArticle(data));
       syncItineraryLabels();
       if (invokeRequested && data.nickname === session?.nickname && data.text?.includes("@行程助手")) {
         invokeRequested = false; generateItinerary();
@@ -598,7 +630,7 @@ function onMessage(event) {
       break;
     case "closed":
       resetRoom(
-        data.reason === "left"
+        data.reason === "left" || (data.reason === "owner_left" && itineraryOwner)
           ? "已离开房间。"
           : data.reason === "expired"
             ? "房间已到期。"
@@ -606,6 +638,10 @@ function onMessage(event) {
       );
       break;
     case "error":
+      if (olderButton.disabled &&
+          ["history_read_failed", "history_unavailable", "invalid_history"].includes(data.code)) {
+        showHistoryButton(historyBefore);
+      }
       // 恢复失败不循环提交无效令牌；让用户明确选择新的房间。
       if (data.code === "login_expired" || data.code === "login_required") {
         account = null;
@@ -915,7 +951,7 @@ $("leave").addEventListener("click", () => {
     !confirm(`你是房主。离开会关闭房间，所有人都将退出。${scheduled}确认离开？`)
   )
     return;
-  if (send({ type: "leave" })) resetRoom("已离开房间。");
+  if (send({ type: "leave" })) $("leave").disabled = true;
 });
 $("close-room").addEventListener("click", () => {
   const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
@@ -1218,7 +1254,7 @@ const noticeDialog = $("notice-dialog");
 const noticeCards = new Map();
 let noticeView = "", noticeBusy = false, noticeRequestId = "";
 
-function displayNoticeCard(data) {
+function displayNoticeCard(data, page) {
   let card = noticeCards.get(data.id);
   if (card && Number(card.dataset.revision) >= data.revision) return;
   const isNew = !card;
@@ -1237,7 +1273,10 @@ function displayNoticeCard(data) {
   const timing = document.createElement("small");
   if (data.status !== "cancelled") timing.textContent = "邮件排期 " + shanghaiTime(Date.parse(data.due) / 1000);
   card.replaceChildren(tag, title, body, timing);
-  if (isNew) appendMessage(card);
+  if (isNew) {
+    if (page) page.append(card);
+    else appendMessage(card);
+  }
 }
 
 async function noticeAPI(action, payload, room = false) {

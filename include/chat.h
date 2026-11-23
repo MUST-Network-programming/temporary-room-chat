@@ -40,6 +40,8 @@ void ws_process(Client *c);
 void room_message(Client *c, const char *text, size_t len);
 void room_disconnect(Client *c);
 void room_tick(time_t now);
+int rooms_storage_open(const char *path);
+void rooms_storage_close(void);
 void http_process(Client *c);
 int tls_init(const char *cert, const char *key);
 int tls_attach(Client *c);
