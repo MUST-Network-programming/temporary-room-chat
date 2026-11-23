@@ -315,8 +315,8 @@ const compactRoom = matchMedia("(max-width: 680px)");
 function showRoomInfo(expanded) {
   $("room-info").setAttribute("aria-expanded", String(expanded));
   $("room-sidebar").classList.toggle("expanded", expanded);
-  if (expanded) $("itinerary-panel").hidden = true;
-  resizeDraft();
+  if (expanded) closeItinerary();
+  else resizeDraft();
 }
 $("room-info").addEventListener("click", () => {
   const expanded = $("room-info").getAttribute("aria-expanded") === "true";
@@ -354,7 +354,8 @@ function send(data) {
 }
 function resetRoom(message) {
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
-  $("itinerary-panel").hidden = true; $("pinned-itinerary").hidden = true;
+  closeItinerary();
+  $("pinned-itinerary").hidden = true;
   session = null;
   joined = false;
   pending = false;
@@ -979,13 +980,23 @@ function openItinerary() {
   $("itinerary-panel").hidden=false; $("itinerary-toggle").setAttribute("aria-expanded","true");
   showRoomInfo(false); refreshItinerary();
 }
+function closeItinerary() {
+  $("itinerary-panel").hidden = true;
+  $("itinerary-toggle").setAttribute("aria-expanded", "false");
+  resizeDraft();
+}
 $("itinerary-toggle").addEventListener("click", () => {
   if ($("itinerary-panel").hidden) openItinerary();
-  else { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); }
+  else closeItinerary();
 });
-$("itinerary-close").addEventListener("click", () => { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); $("itinerary-toggle").focus(); });
+$("itinerary-close").addEventListener("click", () => {
+  closeItinerary();
+  $("itinerary-toggle").focus();
+});
 $("pinned-itinerary").addEventListener("click",openItinerary);
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") { $("itinerary-panel").hidden=true; $("itinerary-toggle").setAttribute("aria-expanded","false"); } });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("itinerary-panel").hidden) closeItinerary();
+});
 async function itineraryAPI(action, body) {
   if (!assistantToken || !joined) throw new Error("请先加入房间");
   const r = await fetch("/api/itinerary/"+action,{method:body ? "POST":"GET", headers:{"Authorization":"Bearer "+assistantToken,...(body ? {"Content-Type":"application/json"}:{})},...(body ? {body:JSON.stringify(body)}:{})});
