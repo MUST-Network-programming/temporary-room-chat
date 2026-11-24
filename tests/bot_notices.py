@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import smtplib
 import socket
 import ssl
 import subprocess
@@ -15,6 +16,7 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from unittest.mock import patch
 
 from aiohttp import ClientSession, web
 
@@ -22,6 +24,22 @@ from integration import ROOT
 
 CERTS = ROOT / 'tls/certs'
 SHANGHAI = ZoneInfo('Asia/Shanghai')
+
+
+async def failed_verification():
+    sys.path.insert(0, str(ROOT))
+    from assistant import notices
+    with tempfile.TemporaryDirectory(prefix='notice-verification-') as temp:
+        with patch.object(notices, 'STATE', Path(temp)):
+            notices.initialize()
+            with notices.database() as conn:
+                conn.execute('INSERT INTO contacts VALUES(?,?)', ('bound', 'old@example.test'))
+            with patch.object(notices, 'deliver', side_effect=smtplib.SMTPRecipientsRefused({})):
+                response = await notices.start_verification('bound', {'email': 'new@example.test'})
+            state = notices.contact('bound')
+            assert response.status == 503 and state['email'] == 'old@example.test'
+            assert state['verification_pending'] is False and 0 < state['retry_after'] <= 60
+    print('PASS failed replacement consumes its code and preserves binding and cooldown', flush=True)
 
 
 def free_ports(count):
@@ -135,12 +153,21 @@ async def run(state):
                     return result
 
             async def bind(token, email):
-                await api('send-code', token, {'email': email})
+                assert (await api('contact', token))['retry_after'] == 0
+                sent = await api('send-code', token, {'email': email})
+                assert sent['ok'] and 0 < sent['retry_after'] <= 60
+                limited = await api('send-code', token, {'email': email}, expected=429)
+                assert 0 < limited['retry_after'] <= sent['retry_after']
+                pending = await api('contact', token)
+                assert 0 < pending['retry_after'] <= limited['retry_after']
+                assert pending['verification_pending'] is True
+                assert sum('验证码' in msg['Subject'] and str(msg['To']) == email for msg in inbox()) == 1
                 verification = next(msg for msg in inbox() if str(msg['To']) == email and '验证码' in msg['Subject'])
                 code = re.search(r'\b\d{6}\b', verification.get_content()).group()
                 await api('verify', token, {'code': '000000' if code != '000000' else '000001'}, expected=400)
                 await api('verify', token, {'code': code})
-                assert (await api('contact', token))['email'] == email
+                bound = await api('contact', token)
+                assert bound['email'] == email and bound['verification_pending'] is False
 
             await ready(session, f'http://127.0.0.1:{inbox_port}')
             await ready(session, api_url, context)
@@ -235,5 +262,6 @@ async def run(state):
 
 
 if __name__ == '__main__':
+    asyncio.run(failed_verification())
     with tempfile.TemporaryDirectory(prefix='chat-bot-notices-') as temp:
         asyncio.run(run(Path(temp)))

@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import hmac
+import math
 import os
 import re
 import secrets
@@ -28,6 +29,7 @@ TZ = ZoneInfo('Asia/Shanghai')
 STATE = Path(os.environ.get('ASSISTANT_STATE', str(Path(__file__).resolve().parents[1] / '.local-v2')))
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 IDENTIFIER = re.compile(r'[a-f0-9]{32}')
+VERIFICATION_COOLDOWN = 60
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS contacts(account TEXT PRIMARY KEY, email TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS challenges(
@@ -85,6 +87,20 @@ def mail(email, subject, body, message_id):
     return message
 
 
+def verification_retry_after(requested):
+    return max(0, math.ceil(requested + VERIFICATION_COOLDOWN - time.time()))
+
+
+def verification_pending(challenge):
+    return bool(challenge and challenge['digest'] and challenge['attempts'] < 5
+                and time.time() - challenge['requested'] <= 600)
+
+
+def consume_verification(conn, account):
+    # 保留发送时间，绑定或解绑都不会重置重发间隔。
+    conn.execute("UPDATE challenges SET digest='',attempts=5 WHERE account=?", (account,))
+
+
 async def start_verification(account, payload):
     raw = payload.get('email')
     email = raw.strip().lower() if isinstance(raw, str) else ''
@@ -92,14 +108,16 @@ async def start_verification(account, payload):
         raise ValueError('请输入有效邮箱')
     if local_mail_only() and not email.endswith('@example.test'):
         raise ValueError('本地预览使用 @example.test 邮箱')
-    now = time.time()
     code = f'{secrets.randbelow(1_000_000):06d}'
     digest = code_digest(account, email, code)
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         pending = conn.execute('SELECT requested FROM challenges WHERE account=?', (account,)).fetchone()
-        if pending and now - pending['requested'] < 60:
-            raise web.HTTPTooManyRequests(text='一分钟内只能发送一次验证码')
+        wait = verification_retry_after(pending['requested']) if pending else 0
+        if wait:
+            return web.json_response({'error': '一分钟内只能发送一次验证码', 'retry_after': wait},
+                                     status=429, headers={'Retry-After': str(wait)})
+        now = time.time()
         conn.execute('''INSERT INTO challenges(account,email,digest,requested) VALUES(?,?,?,?)
                      ON CONFLICT(account) DO UPDATE SET email=excluded.email,digest=excluded.digest,
                      requested=excluded.requested,attempts=0''', (account, email, digest, now))
@@ -108,8 +126,13 @@ async def start_verification(account, payload):
                        'verify-' + uuid.uuid4().hex)
         await asyncio.to_thread(deliver, message)
     except (OSError, smtplib.SMTPException, ValueError) as exc:
+        with database() as conn:
+            conn.execute("UPDATE challenges SET digest='',attempts=5 WHERE account=? AND digest=?",
+                         (account, digest))
         print('Verification email failed:', type(exc).__name__, flush=True)
-        raise web.HTTPServiceUnavailable(text='验证码邮件发送失败，请稍后重试') from exc
+        return web.json_response({'error': '验证码邮件发送失败，请稍后重试',
+                                  'retry_after': verification_retry_after(now)}, status=503)
+    return web.json_response({'ok': True, 'retry_after': verification_retry_after(now)})
 
 
 def confirm_email(account, payload):
@@ -119,14 +142,13 @@ def confirm_email(account, payload):
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         row = conn.execute('SELECT * FROM challenges WHERE account=?', (account,)).fetchone()
-        if not row or time.time() - row['requested'] > 600 or row['attempts'] >= 5:
+        if not verification_pending(row):
             raise ValueError('验证码已失效，请重新发送')
         correct = hmac.compare_digest(row['digest'], code_digest(account, row['email'], code))
         if correct:
             conn.execute('''INSERT INTO contacts VALUES(?,?)
                          ON CONFLICT(account) DO UPDATE SET email=excluded.email''', (account, row['email']))
-            # Keep the send timestamp for the resend limit after a successful verification.
-            conn.execute('UPDATE challenges SET digest=?,attempts=5 WHERE account=?', ('', account))
+            consume_verification(conn, account)
         else:
             conn.execute('UPDATE challenges SET attempts=attempts+1 WHERE account=?', (account,))
     if not correct:
@@ -136,9 +158,13 @@ def confirm_email(account, payload):
 def contact(account):
     with database() as conn:
         row = conn.execute('SELECT email FROM contacts WHERE account=?', (account,)).fetchone()
+        challenge = conn.execute('SELECT requested,digest,attempts FROM challenges WHERE account=?',
+                                 (account,)).fetchone()
     return {'email': row['email'] if row else None,
             'registration_email': verified_email(account) if not row else None,
-            'local_only': local_mail_only()}
+            'local_only': local_mail_only(),
+            'retry_after': verification_retry_after(challenge['requested']) if challenge else 0,
+            'verification_pending': verification_pending(challenge)}
 
 
 def use_registration_email(account):
@@ -151,13 +177,14 @@ def use_registration_email(account):
         current = conn.execute('SELECT email FROM contacts WHERE account=?', (account,)).fetchone()
         if current['email'] != email:
             raise web.HTTPConflict(text='已有通知邮箱，请先解除绑定')
+        consume_verification(conn, account)
 
 
 def unbind_email(account):
     with database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         conn.execute('DELETE FROM contacts WHERE account=?', (account,))
-        conn.execute('UPDATE challenges SET digest=?,attempts=5 WHERE account=?', ('', account))
+        consume_verification(conn, account)
         conn.execute("UPDATE deliveries SET status='skipped' WHERE account=? AND status='pending'", (account,))
 
 
@@ -321,7 +348,7 @@ async def api(request):
     if action in ('cancel', 'reschedule'):
         await announce(change_notice(account, payload, action))
     elif action == 'send-code':
-        await start_verification(account, payload)
+        return await start_verification(account, payload)
     elif action == 'verify':
         confirm_email(account, payload)
     elif action == 'use-registration-email':
