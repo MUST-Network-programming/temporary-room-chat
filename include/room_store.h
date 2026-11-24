@@ -11,7 +11,10 @@ int room_store_restore(int (*restore)(const char *, const char *, const char *, 
 int room_store_create(const char *instance, const char *code, const char *name, time_t expires, const char *owner);
 int room_store_add_member(const char *instance, const char *name);
 int room_store_remove_member(const char *instance, const char *name);
+int room_store_set_owner(const char *instance, const char *old_owner, const char *new_owner);
+int room_store_transfer_and_leave(const char *instance, const char *old_owner, const char *new_owner);
 int room_store_rename(const char *instance, const char *name);
+int room_store_extend(const char *instance, time_t expires);
 int room_store_remove(const char *instance);
 int room_store_append(const char *instance, cJSON *message);
 int room_store_notice(const char *instance, const char *id, unsigned revision, cJSON *message, int *existing);

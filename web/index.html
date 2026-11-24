@@ -2,8 +2,11 @@
 <html lang="zh-CN" translate="no">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f7f8f7" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#eef2f7" />
     <title>同行 · 临时聊天室</title>
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
@@ -11,30 +14,46 @@
   <body>
     <a class="skip-link" href="#workspace">跳到主要内容</a>
     <div class="app-shell" id="app-shell">
-      <aside class="navigation" aria-label="房间导航">
-        <a class="brand" href="/" aria-label="同行聊天室首页"
-          ><span class="brand-mark" aria-hidden="true">同</span
-          ><span
-            >同行<span class="brand-caption">房间与对话</span></span
-          ></a
-        >
+      <div id="nav-backdrop" class="nav-backdrop" hidden></div>
+      <aside id="navigation" class="navigation" aria-label="房间导航">
+        <div class="nav-header">
+          <a class="brand" href="/" aria-label="同行聊天室首页">
+            <span class="brand-mark" aria-hidden="true">同</span>
+            <span class="brand-meta">
+              <span class="brand-name">同行</span>
+              <span class="brand-caption">临时聊天室</span>
+            </span>
+          </a>
+          <button
+            id="nav-close"
+            class="icon-pill nav-close"
+            type="button"
+            aria-label="收起导航菜单"
+          >
+            <span data-icon="close"></span>
+          </button>
+        </div>
         <div class="nav-section">
-          <p class="eyebrow">聊天</p>
+          <p class="eyebrow">导航</p>
           <button id="lobby-nav" class="nav-button active" type="button">
-            <span data-icon="chat"></span>加入 / 创建
+            <span class="nav-icon" data-icon="chat"></span>
+            <span class="nav-label">房间大厅</span>
           </button>
         </div>
         <div class="nav-history">
           <div class="section-label">
-            最近房间 <span class="small-label">本机记录</span>
+            <span>最近房间</span>
+            <span class="small-label">本机记录</span>
           </div>
-          <label class="search-box"
-            ><span data-icon="search"></span
-            ><input
+          <label class="search-box">
+            <span class="search-icon" data-icon="search"></span>
+            <input
               id="room-search"
-              placeholder="搜索名称或房间码"
+              type="search"
+              placeholder="搜索房间名或加入码"
               aria-label="搜索最近房间"
-          /></label>
+            />
+          </label>
           <section
             id="room-recent"
             class="room-recent"
@@ -44,36 +63,54 @@
             <ul id="room-recent-list"></ul>
           </section>
           <p id="recent-empty" class="empty-recent">
-            还没有最近房间。
+            暂无最近房间
           </p>
         </div>
         <div class="nav-bottom">
           <div class="local-note">
-            <span data-icon="clock"></span>
+            <span class="local-note-icon" data-icon="clock"></span>
             <div>
-              临时聊天室
-              <p>房间到期后关闭。</p>
+              <strong>临时房间</strong>
+              <p>到期后自动关闭</p>
             </div>
           </div>
-          <span id="transport"></span>
+          <span id="transport" class="transport-badge"></span>
         </div>
       </aside>
       <div class="workspace" id="workspace" tabindex="-1">
         <header class="topbar">
-          <div id="account-brand" class="account-brand" hidden>
-            <span class="account-mark" aria-hidden="true">同</span>
-            <span>同行</span>
-          </div>
-          <div class="breadcrumb">
-            <span data-icon="chat"></span><span>同行空间</span
-            ><span class="slash">/</span
-            ><strong id="page-label">房间大厅</strong>
+          <div class="topbar-leading">
+            <button
+              id="nav-toggle"
+              class="icon-pill nav-toggle"
+              type="button"
+              aria-label="打开房间导航"
+              aria-expanded="false"
+              aria-controls="navigation"
+            >
+              <span data-icon="menu"></span>
+            </button>
+            <div id="account-brand" class="account-brand" hidden>
+              <span class="account-mark" aria-hidden="true">同</span>
+              <span>同行</span>
+            </div>
+            <div class="breadcrumb">
+              <span class="breadcrumb-icon" data-icon="chat"></span>
+              <span class="breadcrumb-root">同行空间</span>
+              <span class="slash" aria-hidden="true">/</span>
+              <strong id="page-label">房间大厅</strong>
+            </div>
           </div>
           <div class="topbar-actions">
             <span id="status" class="connection" role="status">正在连接…</span>
             <div class="theme-picker">
               <label class="sr-only" id="theme-label" for="theme">外观主题</label>
-              <select id="theme" class="theme-native" aria-hidden="true" tabindex="-1">
+              <select
+                id="theme"
+                class="theme-native"
+                aria-hidden="true"
+                tabindex="-1"
+              >
                 <option value="system">跟随系统</option>
                 <option value="light">浅色</option>
                 <option value="dark">深色</option>
@@ -89,17 +126,45 @@
               >
                 跟随系统
               </button>
-              <ul id="theme-menu" class="theme-menu" role="listbox" aria-labelledby="theme-label" hidden>
-                <li role="option" id="theme-opt-system" data-value="system" aria-selected="true">跟随系统</li>
-                <li role="option" id="theme-opt-light" data-value="light" aria-selected="false">浅色</li>
-                <li role="option" id="theme-opt-dark" data-value="dark" aria-selected="false">深色</li>
+              <ul
+                id="theme-menu"
+                class="theme-menu"
+                role="listbox"
+                aria-labelledby="theme-label"
+                hidden
+              >
+                <li
+                  role="option"
+                  id="theme-opt-system"
+                  data-value="system"
+                  aria-selected="true"
+                >
+                  跟随系统
+                </li>
+                <li
+                  role="option"
+                  id="theme-opt-light"
+                  data-value="light"
+                  aria-selected="false"
+                >
+                  浅色
+                </li>
+                <li
+                  role="option"
+                  id="theme-opt-dark"
+                  data-value="dark"
+                  aria-selected="false"
+                >
+                  深色
+                </li>
               </ul>
             </div>
           </div>
         </header>
         <main>
           <div id="loading-panel" class="loading-panel" role="status">
-            正在连接你的聊天空间…
+            <span class="loader" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>正在连接…</span>
           </div>
           <section
             id="lobby"
@@ -108,27 +173,51 @@
             aria-labelledby="welcome"
           >
             <div class="entry-heading">
-              <div>
-                <p class="eyebrow">开始聊天</p>
-                <h1 id="welcome">加入房间</h1>
-                <p>输入房间码，或创建一个新房间。</p>
+              <div class="entry-title-group">
+                                <h1 id="welcome">加入房间</h1>
+                <p>输入房间码加入，或创建一个新房间。</p>
               </div>
-              <button id="logout" class="secondary" type="button" hidden>
-                退出登录
+              <button id="logout" class="secondary pill-btn" type="button" hidden>
+                <span data-icon="logout"></span>
+                <span>退出登录</span>
               </button>
             </div>
-            <p id="signed-in" class="muted" hidden></p>
-            <div id="notice-account-actions" class="notice-account-actions" hidden>
-              <button id="notice-contact-open" class="secondary" type="button">通知邮箱</button>
-              <button id="notice-mine-open" class="secondary" type="button">我发布的通知</button>
+            <div class="account-strip">
+              <p id="signed-in" class="signed-in-pill muted" hidden></p>
+              <div
+                id="notice-account-actions"
+                class="notice-account-actions"
+                hidden
+              >
+                <button
+                  id="notice-contact-open"
+                  class="secondary pill-btn"
+                  type="button"
+                >
+                  <span data-icon="mail"></span>
+                  <span>通知邮箱</span>
+                </button>
+                <button
+                  id="notice-mine-open"
+                  class="secondary pill-btn"
+                  type="button"
+                >
+                  <span data-icon="bell"></span>
+                  <span>我发布的通知</span>
+                </button>
+              </div>
             </div>
             <div class="lobby-grid">
               <form id="entry-form" class="entry-form lobby-card">
-                <div class="card-icon" data-icon="chat"></div>
-                <h2>房间信息</h2>
-                <p id="join-description" class="card-description">
-                  输入昵称和6位房间码。
-                </p>
+                <div class="card-header">
+                  <div class="card-icon card-icon-join" data-icon="chat"></div>
+                  <div>
+                    <h2>加入房间</h2>
+                    <p id="join-description" class="card-description">
+                      输入昵称和6位房间码。
+                    </p>
+                  </div>
+                </div>
                 <div id="nickname-field" class="field">
                   <label for="nickname">昵称</label>
                   <input
@@ -150,8 +239,14 @@
                       autocapitalize="characters"
                       placeholder="例如 A1B2C3"
                     />
-                    <button id="join" type="submit" disabled>
-                      加入房间 <span data-icon="arrow"></span>
+                    <button
+                      id="join"
+                      class="cta-primary"
+                      type="submit"
+                      disabled
+                    >
+                      <span>加入房间</span>
+                      <span class="cta-arrow" data-icon="arrow"></span>
                     </button>
                   </div>
                 </div>
@@ -164,16 +259,23 @@
                 <p id="notice" class="notice" role="status" hidden></p>
               </form>
               <div class="create-card">
-                <div class="card-icon" data-icon="plus"></div>
-                <h2>新建房间</h2>
-                <p>
-                  创建后，将房间码分享给同行成员。
-                </p>
-                <button id="create" type="button" disabled>
-                  <span data-icon="plus"></span> 创建房间
+                <div class="card-header">
+                  <div
+                    class="card-icon card-icon-create"
+                    data-icon="plus"
+                  ></div>
+                  <div>
+                    <h2>创建房间</h2>
+                    <p>创建后会生成 6 位房间码，发给朋友即可加入。</p>
+                  </div>
+                </div>
+                <button id="create" class="cta-create" type="button" disabled>
+                  <span class="cta-plus" data-icon="plus"></span>
+                  <span>创建房间</span>
                 </button>
                 <div class="create-footnote">
-                  <span data-icon="clock"></span>临时房间 · 到期即关闭
+                  <span data-icon="clock"></span>
+                  <span>房间到期后自动关闭，记录随之清除</span>
                 </div>
               </div>
             </div>
@@ -192,56 +294,128 @@
               ></div>
               <div class="conversation-title">
                 <h1 id="room-name">同行房间</h1>
-                <p>
-                  <span class="online-dot" aria-hidden="true"></span
-                  ><span id="member-count">0</span> 人在线
-                  <span aria-hidden="true">·</span> <span id="identity"></span>
+                <p class="conversation-subtitle">
+                  <span class="online-dot" aria-hidden="true"></span>
+                  <span><span id="member-count">0</span> 人在线</span>
+                  <span class="title-sep" aria-hidden="true">·</span>
+                  <span id="identity"></span>
                 </p>
               </div>
               <div class="conversation-actions">
-                <button id="notice-publish-open" class="secondary" type="button" hidden>重要通知</button>
-                <button id="itinerary-toggle" class="secondary" type="button" aria-controls="itinerary-panel" aria-expanded="false">行程与提醒</button>
-                <button
+                <button data-tip="重要通知"
+                  id="notice-publish-open"
+                  class="action-pill secondary"
+                  type="button"
+                  aria-label="发布重要通知"
+                  hidden
+                >
+                  <span data-icon="bell"></span>
+                  <span class="action-label">重要通知</span>
+                </button>
+                <button data-tip="行程与提醒"
+                  id="itinerary-toggle"
+                  class="action-pill secondary"
+                  type="button"
+                  aria-label="行程与提醒"
+                  aria-controls="itinerary-panel"
+                  aria-expanded="false"
+                >
+                  <span data-icon="calendar"></span>
+                  <span class="action-label">行程与提醒</span>
+                </button>
+                <button data-tip="房间信息"
                   id="room-info"
                   aria-label="显示或隐藏房间信息"
-                  class="secondary"
+                  class="action-pill secondary"
                   type="button"
                   aria-expanded="false"
                   aria-controls="room-sidebar"
                 >
-                  <span data-icon="info"></span><span>房间信息</span>
+                  <span data-icon="info"></span>
+                  <span class="action-label">房间信息</span>
                 </button>
-                <button id="leave" class="secondary" type="button">
-                  离开房间
+                <button data-tip="离开房间"
+                  id="leave"
+                  class="action-pill action-leave secondary"
+                  type="button"
+                  aria-label="离开房间"
+                >
+                  <span data-icon="logout"></span>
+                  <span class="action-label">离开</span>
                 </button>
               </div>
             </header>
             <aside id="room-sidebar" class="room-sidebar" aria-label="房间信息">
+              <div class="drawer-mobile-head">
+                <h2>房间详情</h2>
+                <button
+                  id="room-sidebar-close"
+                  class="icon-pill"
+                  type="button"
+                  aria-label="关闭房间信息"
+                >
+                  <span data-icon="close"></span>
+                </button>
+              </div>
+              <div class="room-code-card">
+                <p class="small-label">房间加入码</p>
+                <strong id="room-id" class="room-id"></strong>
+                <button
+                  id="copy-code"
+                  class="copy-btn secondary copy-button"
+                  type="button"
+                >
+                  <span class="copy-icon-default" data-icon="copy"></span>
+                  <span class="copy-icon-done" data-icon="check" hidden></span>
+                  <span class="copy-label">复制加入码</span>
+                </button>
+                <p class="field-hint">把房间码发给朋友即可加入</p>
+              </div>
               <div class="members-block">
-                <p class="eyebrow">IN THIS ROOM</p>
+                
                 <h2>
-                  在线成员<span class="online-dot" aria-hidden="true"></span>
+                  <span class="online-dot" aria-hidden="true"></span>
+                  <span>在线成员</span>
                 </h2>
                 <ul id="members"></ul>
               </div>
-              <div>
-                <p class="small-label">房间码</p>
-                <strong id="room-id" class="room-id"></strong
-                ><button
-                  id="copy-code"
-                  class="secondary copy-button"
+              <div class="sidebar-tools">
+                <button
+                  id="notify-toggle"
+                  class="secondary full-width-btn"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  <span data-icon="bell"></span>
+                  <span id="notify-toggle-label">桌面通知：关</span>
+                </button>
+                <button
+                  id="export-chat"
+                  class="secondary full-width-btn"
                   type="button"
                 >
-                  <span data-icon="copy"></span>复制加入码
+                  <span data-icon="download"></span>
+                  <span>导出聊天记录 (.md)</span>
                 </button>
-                <p class="field-hint">邀请朋友加入这个房间</p>
+                <button
+                  id="notice-room-contact"
+                  class="secondary full-width-btn"
+                  type="button"
+                  hidden
+                >
+                  <span data-icon="mail"></span>
+                  <span>绑定通知邮箱</span>
+                </button>
               </div>
-              <button id="notice-room-contact" class="secondary" type="button" hidden>绑定通知邮箱</button>
               <details id="room-settings" class="room-settings">
                 <summary>房间设置</summary>
                 <div class="room-settings-body">
                   <p id="expiry" class="muted"></p>
                   <div class="room-actions">
+                    <button id="extend-room" class="secondary" type="button" hidden>
+                      <span data-icon="clock"></span>
+                      <span>延长有效期 (+2小时)</span>
+                    </button>
                     <button id="rename" class="secondary" type="button" hidden>
                       更改群名
                     </button>
@@ -256,44 +430,150 @@
                       />
                       <div class="rename-actions">
                         <button id="rename-save" type="submit">保存</button>
-                        <button id="rename-cancel" class="secondary" type="button">
+                        <button
+                          id="rename-cancel"
+                          class="secondary"
+                          type="button"
+                        >
                           取消
                         </button>
                       </div>
                     </form>
-                    <button id="close-room" class="danger" type="button" hidden>
+                    <button
+                      id="close-room"
+                      class="danger"
+                      type="button"
+                      hidden
+                    >
                       关闭房间
                     </button>
                   </div>
                 </div>
               </details>
             </aside>
-            <aside id="itinerary-panel" class="itinerary-panel" aria-label="行程与邮件提醒" hidden>
-              <div class="panel-heading"><h2>行程与提醒</h2><button id="itinerary-close" class="secondary" type="button" aria-label="关闭行程面板">✕</button></div>
+            <aside
+              id="itinerary-panel"
+              class="itinerary-panel"
+              aria-label="行程与邮件提醒"
+              hidden
+            >
+              <div class="panel-heading">
+                <h2>行程与提醒</h2>
+                <button
+                  id="itinerary-close"
+                  class="icon-pill secondary"
+                  type="button"
+                  aria-label="关闭行程面板"
+                >
+                  ✕
+                </button>
+              </div>
               <p id="extraction-mode" class="field-hint">读取后台状态…</p>
               <p class="field-hint">上海时间 · Asia/Shanghai（UTC+8）</p>
               <p id="itinerary-notice" role="status" class="notice" hidden></p>
-              <div id="owner-tools" hidden><button id="extract-itinerary" type="button">从群聊提取草稿</button><p class="field-hint">也可在群里发送 @行程助手。缺失和冲突不会擅自补全。</p></div>
-              <div class="panel-section"><h3 id="itinerary-version">暂无行程</h3><p id="itinerary-conflicts" class="field-hint"></p>
-                <form id="itinerary-form" hidden><div id="itinerary-fields" class="itinerary-fields"></div>
-                  <label id="resolve-row" class="check-row" hidden><input type="checkbox" id="resolve-conflicts"> 已核对并解决上述冲突</label>
-                  <div id="confirm-tools" hidden><label class="check-row"><input id="demo-reminder" type="checkbox"> 同时添加一分钟后本地测试提醒</label>
-                  <div class="form-actions"><button id="save-itinerary" type="button" class="secondary">保存草稿</button><button id="confirm-itinerary" type="submit">确认并发布</button></div></div>
-                </form>
+              <div id="owner-tools" hidden>
+                <button id="extract-itinerary" class="cta-primary" type="button">
+                  从群聊提取草稿
+                </button>
+                <p class="field-hint">
+                  也可在群里发送 @行程助手。缺失和冲突不会擅自补全。
+                </p>
               </div>
-              <div class="panel-section"><h3>我的邮件订阅</h3><p class="field-hint">前一晚20:00 / 集合前30分钟。已过时间不补发；新版确认后取消旧提醒。</p>
-                <form id="subscription-form"><label for="subscriber-email">订阅邮箱</label><input id="subscriber-email" type="email" placeholder="traveler@example.test" autocomplete="off" required><div class="form-actions"><button type="submit" class="secondary">订阅提醒</button><button id="unsubscribe" type="button" class="secondary">取消订阅</button></div></form>
+              <div class="panel-section">
+                <h3 id="itinerary-version">暂无行程</h3>
+                <p id="itinerary-conflicts" class="field-hint"></p>
+                <form id="itinerary-form" hidden>
+                  <div id="itinerary-fields" class="itinerary-fields"></div>
+                  <label id="resolve-row" class="check-row" hidden>
+                    <input type="checkbox" id="resolve-conflicts" />
+                    <span>已核对并解决上述冲突</span>
+                  </label>
+                  <div id="confirm-tools" hidden>
+                    <label class="check-row">
+                      <input id="demo-reminder" type="checkbox" />
+                      <span>同时添加一分钟后本地测试提醒</span>
+                    </label>
+                    <div class="form-actions">
+                      <button
+                        id="save-itinerary"
+                        type="button"
+                        class="secondary"
+                      >
+                        保存草稿
+                      </button>
+                      <button
+                        id="confirm-itinerary"
+                        class="cta-primary"
+                        type="submit"
+                      >
+                        确认并发布
+                      </button>
+                    </div>
+                  </div>
+                </form>
+                <button
+                  id="export-itinerary-ics"
+                  class="secondary full-width-btn export-ics-btn"
+                  type="button"
+                  hidden
+                >
+                  <span data-icon="download"></span>
+                  <span>导出到系统日历 (.ics)</span>
+                </button>
+              </div>
+              <div class="panel-section">
+                <h3>我的邮件订阅</h3>
+                <p class="field-hint">
+                  前一晚20:00 / 集合前30分钟。已过时间不补发；新版确认后取消旧提醒。
+                </p>
+                <form id="subscription-form">
+                  <label for="subscriber-email">订阅邮箱</label>
+                  <input
+                    id="subscriber-email"
+                    type="email"
+                    placeholder="traveler@example.test"
+                    autocomplete="off"
+                    required
+                  />
+                  <div class="form-actions">
+                    <button type="submit" class="secondary">订阅提醒</button>
+                    <button id="unsubscribe" type="button" class="secondary">
+                      取消订阅
+                    </button>
+                  </div>
+                </form>
                 <p id="subscription-state" class="field-hint"></p>
               </div>
-              <div class="panel-section"><h3>发送记录与排期</h3><ul id="itinerary-jobs" class="job-list"></ul><ul id="itinerary-logs" class="job-list"></ul></div>
+              <div class="panel-section">
+                <h3>发送记录与排期</h3>
+                <ul id="itinerary-jobs" class="job-list"></ul>
+                <ul id="itinerary-logs" class="job-list"></ul>
+              </div>
             </aside>
             <div class="conversation">
-              <button id="pinned-itinerary" class="pinned-itinerary secondary" type="button" hidden></button>
+              <div id="expiry-banner" class="expiry-banner" role="status" hidden>
+                <span class="expiry-banner-icon" data-icon="clock"></span>
+                <span id="expiry-banner-text"></span>
+                <button
+                  id="expiry-banner-extend"
+                  class="secondary pill-btn"
+                  type="button"
+                  hidden
+                >
+                  延长 2 小时
+                </button>
+              </div>
+              <button
+                id="pinned-itinerary"
+                class="pinned-itinerary secondary"
+                type="button"
+                hidden
+              ></button>
               <div class="message-area">
                 <div id="conversation-intro" class="conversation-intro">
                   <span class="intro-icon" data-icon="chat"></span>
-                  <h2>开始对话</h2>
-                  <p>讨论行程后，房主可 @行程助手 提取草稿。</p>
+                  <h2>还没有消息</h2>
+                  <p>发送第一条消息开始聊天。房主可以 @行程助手 整理行程。</p>
                 </div>
                 <div
                   id="messages"
@@ -303,65 +583,94 @@
                   aria-relevant="additions"
                   tabindex="0"
                 >
-                  <button id="older-messages" class="secondary" type="button" hidden>加载更早的消息</button>
+                  <button
+                    id="older-messages"
+                    class="secondary pill-btn"
+                    type="button"
+                    hidden
+                  >
+                    加载更早的消息
+                  </button>
                 </div>
-                <button id="latest" class="secondary" type="button" hidden>
-                  回到最新
+                <button id="latest" class="latest-pill secondary" type="button" hidden>
+                  <span>回到最新</span>
                 </button>
               </div>
               <p id="room-notice" class="room-notice" role="status" hidden></p>
             </div>
             <form id="message-form" class="composer">
-              <div class="composer-row">
+              <div id="reply-preview" class="reply-preview" hidden>
+                <div class="reply-preview-body">
+                  <strong id="reply-preview-name"></strong>
+                  <span id="reply-preview-text"></span>
+                </div>
                 <button
-                  id="expression-toggle"
-                  class="secondary"
+                  id="reply-cancel"
+                  class="icon-pill"
                   type="button"
-                  aria-expanded="false"
-                  aria-controls="expression-options"
-                  aria-label="选择表情和贴图"
-                  title="表情与贴图"
+                  aria-label="取消引用回复"
                 >
-                  <span data-icon="smile"></span>
+                  <span data-icon="close"></span>
                 </button>
-                <label class="sr-only" for="message">消息内容</label>
-                <textarea
-                  id="message"
-                  rows="1"
-                  maxlength="2048"
-                  placeholder="输入消息…"
-                  required
-                ></textarea>
-                <button
-                  id="send"
-                  aria-label="发送消息"
-                  type="submit"
-                  disabled
-                >
-                  <span>发送</span><span data-icon="send"></span>
-                </button>
+              </div>
+              <div class="composer-shell">
+                <div class="composer-row">
+                  <button
+                    id="expression-toggle"
+                    class="composer-icon-btn secondary"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="expression-options"
+                    aria-label="选择表情和贴图"
+                    data-tip="表情与贴图"
+                  >
+                    <span data-icon="smile"></span>
+                  </button>
+                  <label class="sr-only" for="message">消息内容</label>
+                  <textarea
+                    id="message"
+                    rows="1"
+                    maxlength="2048"
+                    placeholder="输入消息…"
+                    required
+                  ></textarea>
+                  <button
+                    id="send"
+                    class="send-btn"
+                    aria-label="发送消息"
+                    type="submit"
+                    disabled
+                  >
+                    <span class="send-text">发送</span>
+                    <span class="send-icon-wrap" data-icon="send"></span>
+                  </button>
+                </div>
               </div>
               <div id="bot-mention-picker" hidden>
-                <button id="bot-mention-option" class="secondary" type="button">@群聊助手</button>
+                <button
+                  id="bot-mention-option"
+                  class="secondary mention-btn"
+                  type="button"
+                >
+                  @群聊助手
+                </button>
               </div>
               <p class="composer-hint">
-                <span>支持表情与贴图</span
-                ><span>Enter 发送 · Shift + Enter 换行</span>
+                <span>支持表情与贴图</span>
+                <span>Enter 发送 · Shift + Enter 换行</span>
               </p>
               <div id="expression-options" hidden>
-                <p id="emoji-label" class="expression-label">插入表情</p>
+                <p id="emoji-label" class="expression-label">表情</p>
                 <div
                   id="emoji-options"
                   class="expression-grid"
                   role="group"
                   aria-labelledby="emoji-label"
                 ></div>
-                <p id="sticker-label" class="expression-label">
-                  直接发送贴图
-                </p>
+                <p id="sticker-label" class="expression-label">贴图</p>
                 <div
                   id="sticker-options"
-                  class="expression-grid"
+                  class="expression-grid sticker-grid"
                   role="group"
                   aria-labelledby="sticker-label"
                 ></div>
@@ -374,77 +683,115 @@
             hidden
             aria-labelledby="account-title"
           >
-            <h1 id="account-title">登录</h1>
-            <p id="account-description">使用同行账号创建或加入临时房间。</p>
-            <form id="account-form" novalidate>
-              <fieldset id="account-fields" class="account-fields" aria-label="账号信息">
-                <div class="account-row">
-                  <label for="account-name">用户名</label>
-                  <input
-                    id="account-name"
-                    name="username"
-                    autocomplete="username"
-                    required
-                    minlength="3"
-                    maxlength="24"
-                    pattern="[a-z0-9_]+"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
-                </div>
-                <div class="account-row">
-                  <label for="account-password">密码</label>
-                  <input
-                    id="account-password"
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    required
-                    minlength="8"
-                    maxlength="128"
-                  />
-                  <button id="account-show-password" class="account-reveal" type="button" aria-label="显示密码">
-                    <span data-icon="eye" aria-hidden="true"></span>
-                    <span data-icon="eye-off" aria-hidden="true" hidden></span>
-                  </button>
-                </div>
-                <div id="email-register" class="account-row" hidden>
-                  <label for="register-email">邮箱</label>
-                  <input
-                    id="register-email"
-                    name="email"
-                    type="email"
-                    maxlength="254"
-                    autocomplete="email"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
-                  <button id="send-register-code" class="account-code-button" type="button">
-                    发送注册码
-                  </button>
-                </div>
-                <div id="invite-field" class="account-row" hidden>
-                  <label for="invite-code">注册码</label>
-                  <input
-                    id="invite-code"
-                    name="invite"
-                    maxlength="32"
-                    autocomplete="off"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
-                </div>
-              </fieldset>
-              <p id="account-notice" class="account-feedback" role="status" hidden></p>
-              <button id="account-submit" class="account-submit" type="submit" disabled>
-                <span id="account-spinner" class="account-spinner" aria-hidden="true" hidden></span>
-                <span id="account-submit-text">登录</span>
-              </button>
-              <div class="account-switch">
-                <span id="account-switch-label">没有账号？</span>
-                <button id="account-toggle" type="button">使用注册码注册</button>
+            <div class="account-card">
+              <div class="account-card-head">
+                                <h1 id="account-title">登录</h1>
+                <p id="account-description">使用同行账号创建或加入临时房间。</p>
               </div>
-            </form>
+              <form id="account-form" novalidate>
+                <fieldset
+                  id="account-fields"
+                  class="account-fields"
+                  aria-label="账号信息"
+                >
+                  <div class="account-row">
+                    <label for="account-name">用户名</label>
+                    <input
+                      id="account-name"
+                      name="username"
+                      autocomplete="username"
+                      placeholder="3–24 位小写字母或数字"
+                      required
+                      minlength="3"
+                      maxlength="24"
+                      pattern="[a-z0-9_]+"
+                      autocapitalize="none"
+                      spellcheck="false"
+                    />
+                  </div>
+                  <div class="account-row">
+                    <label for="account-password">密码</label>
+                    <input
+                      id="account-password"
+                      name="password"
+                      type="password"
+                      autocomplete="current-password"
+                      placeholder="请输入密码"
+                      required
+                      minlength="8"
+                      maxlength="128"
+                    />
+                    <button
+                      id="account-show-password"
+                      class="account-reveal"
+                      type="button"
+                      aria-label="显示密码"
+                    >
+                      <span data-icon="eye" aria-hidden="true"></span>
+                      <span data-icon="eye-off" aria-hidden="true" hidden></span>
+                    </button>
+                  </div>
+                  <div id="email-register" class="account-row account-row-code" hidden>
+                    <label for="register-email">邮箱</label>
+                    <input
+                      id="register-email"
+                      name="email"
+                      type="email"
+                      placeholder="name@example.com"
+                      maxlength="254"
+                      autocomplete="email"
+                      autocapitalize="none"
+                      spellcheck="false"
+                    />
+                    <button
+                      id="send-register-code"
+                      class="account-code-button"
+                      type="button"
+                    >
+                      发送注册码
+                    </button>
+                  </div>
+                  <div id="invite-field" class="account-row" hidden>
+                    <label for="invite-code">注册码</label>
+                    <input
+                      id="invite-code"
+                      name="invite"
+                      placeholder="粘贴 32 位注册码"
+                      maxlength="32"
+                      autocomplete="off"
+                      autocapitalize="none"
+                      spellcheck="false"
+                    />
+                  </div>
+                </fieldset>
+                <p
+                  id="account-notice"
+                  class="account-feedback"
+                  role="status"
+                  hidden
+                ></p>
+                <button
+                  id="account-submit"
+                  class="account-submit cta-primary"
+                  type="submit"
+                  disabled
+                >
+                  <span
+                    id="account-spinner"
+                    class="account-spinner"
+                    aria-hidden="true"
+                    hidden
+                  ></span>
+                  <span id="account-submit-text">登录</span>
+                </button>
+                <div class="account-switch">
+                  <span id="account-switch-label">没有账号？</span>
+                  <button id="account-toggle" type="button">
+                    使用注册码注册
+                  </button>
+                </div>
+              </form>
+            </div>
           </section>
         </main>
       </div>
@@ -452,9 +799,21 @@
     <dialog id="notice-dialog" aria-labelledby="notice-dialog-title">
       <div class="panel-heading">
         <h2 id="notice-dialog-title"></h2>
-        <button id="notice-dialog-close" class="secondary" type="button" aria-label="关闭">✕</button>
+        <button
+          id="notice-dialog-close"
+          class="icon-pill secondary"
+          type="button"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
       </div>
-      <p id="notice-dialog-status" class="field-hint" role="status" hidden></p>
+      <p
+        id="notice-dialog-status"
+        class="field-hint notice-status-bar"
+        role="status"
+        hidden
+      ></p>
       <form id="notice-compose" class="notice-form" hidden>
         <div class="field">
           <label for="notice-title">标题</label>
@@ -462,7 +821,12 @@
         </div>
         <div class="field">
           <label for="notice-body">通知正文</label>
-          <textarea id="notice-body" rows="4" maxlength="2048" required></textarea>
+          <textarea
+            id="notice-body"
+            rows="4"
+            maxlength="2048"
+            required
+          ></textarea>
         </div>
         <div class="field">
           <label for="notice-due">邮件发送时间（北京时间）</label>
@@ -470,41 +834,114 @@
         </div>
         <p id="notice-coverage" class="field-hint" role="status"></p>
         <div class="form-actions">
-          <button id="notice-preview" class="secondary" type="button">刷新覆盖人数</button>
-          <button id="notice-publish" type="submit" disabled>发布并排期</button>
+          <button id="notice-preview" class="secondary" type="button">
+            刷新覆盖人数
+          </button>
+          <button
+            id="notice-publish"
+            class="cta-primary"
+            type="submit"
+            disabled
+          >
+            发布并排期
+          </button>
         </div>
       </form>
-      <section id="notice-contact" class="notice-form" aria-label="通知邮箱" hidden>
+      <section
+        id="notice-contact"
+        class="notice-form"
+        aria-label="通知邮箱"
+        hidden
+      >
         <p id="notice-contact-current"></p>
-        <div id="notice-registration-contact" class="notice-registration-contact" hidden>
+        <div
+          id="notice-registration-contact"
+          class="notice-registration-contact"
+          hidden
+        >
           <p id="notice-registration-address" class="field-hint"></p>
-          <button id="notice-use-registration-email" class="secondary" type="button" aria-describedby="notice-registration-address">
+          <button
+            id="notice-use-registration-email"
+            class="secondary"
+            type="button"
+            aria-describedby="notice-registration-address"
+          >
             使用已验证的注册邮箱
           </button>
         </div>
-        <p id="notice-contact-local" class="field-hint" hidden>本地预览请使用 @example.test 邮箱，并在本地收件箱查看验证码。</p>
+        <p id="notice-contact-local" class="field-hint" hidden>
+          本地预览请使用 @example.test 邮箱，并在本地收件箱查看验证码。
+        </p>
         <form id="notice-email-form" class="notice-form">
           <div class="field">
             <label for="notice-email">邮箱地址</label>
-            <input id="notice-email" type="email" autocomplete="email" maxlength="254" required />
+            <input
+              id="notice-email"
+              type="email"
+              autocomplete="email"
+              maxlength="254"
+              required
+            />
           </div>
           <div class="form-actions">
-            <button id="notice-send-code" class="secondary" type="submit">发送验证码</button>
-            <button id="notice-unbind" class="secondary" type="button" hidden>解绑邮箱</button>
+            <button id="notice-send-code" class="secondary" type="submit">
+              发送验证码
+            </button>
+            <button id="notice-unbind" class="secondary" type="button" hidden>
+              解绑邮箱
+            </button>
           </div>
         </form>
         <form id="notice-code-form" class="notice-form" hidden>
           <div class="field">
             <label for="notice-code">六位验证码</label>
-            <input id="notice-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required />
+            <input
+              id="notice-code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxlength="6"
+              required
+            />
           </div>
-          <div class="form-actions"><button type="submit">验证并绑定</button></div>
+          <div class="form-actions">
+            <button class="cta-primary" type="submit">验证并绑定</button>
+          </div>
         </form>
       </section>
       <section id="notice-mine" aria-label="我发布的通知" hidden>
-        <button id="notice-refresh" class="secondary" type="button">刷新进度</button>
+        <button id="notice-refresh" class="secondary pill-btn" type="button">
+          刷新进度
+        </button>
         <div id="notice-list" class="notice-list"></div>
       </section>
+    </dialog>
+    <dialog id="leave-dialog" aria-labelledby="leave-dialog-title">
+      <div class="panel-heading">
+        <h2 id="leave-dialog-title">离开房间</h2>
+        <button
+          id="leave-dialog-close"
+          class="icon-pill secondary"
+          type="button"
+          aria-label="关闭"
+        >
+          ✕
+        </button>
+      </div>
+      <p class="field-hint">
+        你是当前房主。可以选择暂时离开（保留房主身份且不影响大家继续聊天，随时可从「最近房间」返回），或转让房主 / 关闭房间。
+      </p>
+      <div id="leave-transfer-group" class="field">
+        <label for="transfer-select">如需转让，选择接任房主</label>
+        <select id="transfer-select"></select>
+      </div>
+      <p id="leave-dialog-scheduled" class="field-hint" hidden></p>
+      <div class="leave-dialog-actions">
+        <button id="leave-detach-confirm" type="button">暂时离开（保留房主，不关闭房间）</button>
+        <button id="leave-transfer-confirm" class="secondary" type="button">转让房主并退出</button>
+        <button id="leave-close-confirm" class="danger" type="button">解散并关闭房间</button>
+        <button id="leave-cancel" class="secondary" type="button">取消</button>
+      </div>
     </dialog>
   </body>
 </html>

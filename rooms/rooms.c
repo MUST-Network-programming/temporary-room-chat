@@ -104,9 +104,14 @@ static void broadcast(int r, cJSON *j) {
 }
 static void online_list(int r) {
     cJSON *j = event("members"), *a = cJSON_AddArrayToObject(j, "members");
-    for (int i = 0; i < SESSION_LIMIT; ++i)
-        if (members[i].used && members[i].room == r && members[i].connection)
+    const char *owner_name = NULL;
+    for (int i = 0; i < SESSION_LIMIT; ++i) {
+        if (!members[i].used || members[i].room != r) continue;
+        if (members[i].owner) owner_name = members[i].nickname;
+        if (members[i].connection)
             cJSON_AddItemToArray(a, cJSON_CreateString(members[i].nickname));
+    }
+    if (owner_name) cJSON_AddStringToObject(j, "owner", owner_name);
     broadcast(r, j);
 }
 static void close_room(int r, const char *reason) {
@@ -221,9 +226,12 @@ static int schema(cJSON *j, const char *type) {
         if (!strcmp(type, "authenticate") && !strcmp(v->string, "token")) continue;
         if ((!strcmp(type, "create") || !strcmp(type, "join")) && !strcmp(v->string, "nickname")) continue;
         if (!strcmp(type, "join") && (!strcmp(v->string, "room") || !strcmp(v->string, "token"))) continue;
-        if (!strcmp(type, "chat") && !strcmp(v->string, "text")) continue;
+        if (!strcmp(type, "chat") && (!strcmp(v->string, "text") ||
+            !strcmp(v->string, "reply_to") || !strcmp(v->string, "reply_text"))) continue;
         if (!strcmp(type, "history") && !strcmp(v->string, "before")) continue;
         if (!strcmp(type, "rename") && !strcmp(v->string, "name")) continue;
+        if (!strcmp(type, "transfer") && !strcmp(v->string, "target")) continue;
+        if (!strcmp(type, "leave") && !strcmp(v->string, "transfer")) continue;
         if (!strcmp(type, "sticker") && !strcmp(v->string, "id")) continue;
         return 0;
     }
@@ -425,16 +433,30 @@ static int publish_event(int r, cJSON *out) {
     broadcast_saved_event(r, out);
     return 1;
 }
-static int publish_message(Member *member, const char *type, const char *field, const char *value) {
+static int publish_message_ex(Member *member, const char *type, const char *field, const char *value,
+                              const char *reply_to, const char *reply_text) {
     cJSON *out = event(type);
     if (!out || !cJSON_AddStringToObject(out, "nickname", member->nickname) ||
-        !cJSON_AddStringToObject(out, field, value)) {
+        !cJSON_AddStringToObject(out, field, value) ||
+        !cJSON_AddNumberToObject(out, "time", (double)time(NULL)) ||
+        (reply_to && !cJSON_AddStringToObject(out, "reply_to", reply_to)) ||
+        (reply_text && !cJSON_AddStringToObject(out, "reply_text", reply_text))) {
         cJSON_Delete(out);
         return 0;
     }
     if (!publish_event(member->room, out)) return 0;
     log_room_event(&rooms[member->room], type, member->nickname, field, value);
     return 1;
+}
+static int publish_message(Member *member, const char *type, const char *field, const char *value) {
+    return publish_message_ex(member, type, field, value, NULL, NULL);
+}
+static int find_room_member(int r, const char *nickname) {
+    if (!nickname) return -1;
+    for (int i = 0; i < SESSION_LIMIT; ++i)
+        if (members[i].used && members[i].room == r && !strcmp(members[i].nickname, nickname))
+            return i;
+    return -1;
 }
 static int valid_sticker(const char *id) {
     return id && (!strcmp(id, "wave") || !strcmp(id, "ok") ||
@@ -552,6 +574,7 @@ static void bot_reply(Client *c, cJSON *j) {
             cJSON *out = event("chat");
             cJSON_AddStringToObject(out, "nickname", BOT_NAME);
             cJSON_AddStringToObject(out, "text", text);
+            cJSON_AddNumberToObject(out, "time", (double)time(NULL));
             cJSON_AddBoolToObject(out, "bot", 1);
             if (!publish_event(r, out)) bot_error(r, request->asker, "暂时无法保存群聊助手的回复");
         }
@@ -686,15 +709,21 @@ void room_message(Client *c, const char *text, size_t len) {
     } else if (!strcmp(type,"ping")) send_json(c,event("pong"));
     else if (!strcmp(type,"create") || !strcmp(type,"join")) enter(c,j,!strcmp(type,"create"));
     else if (!strcmp(type,"chat") || !strcmp(type,"leave") || !strcmp(type,"close") ||
-             !strcmp(type,"rename") || !strcmp(type,"sticker") || !strcmp(type,"history")) {
+             !strcmp(type,"rename") || !strcmp(type,"sticker") || !strcmp(type,"history") ||
+             !strcmp(type,"transfer") || !strcmp(type,"extend") || !strcmp(type,"detach")) {
         int i = member_of(c);
         if (i < 0) send_error(c,"not_joined","请先加入房间");
         else {
             int r = members[i].room;
             if (!strcmp(type,"chat")) {
                 const char *body = string_field(j,"text");
+                const char *reply_to = string_field(j,"reply_to");
+                const char *reply_text = string_field(j,"reply_text");
                 if (!body || !valid_string(body,2048,0)) send_error(c,"invalid_text","消息需要 1–2048 个合法 UTF-8 字节");
-                else if (!publish_message(&members[i], "chat", "text", body))
+                else if ((reply_to || reply_text) &&
+                         (!reply_to || !reply_text || !valid_string(reply_to, 48, 1) || !valid_string(reply_text, 200, 0)))
+                    send_error(c, "invalid_reply", "引用内容无效或过长");
+                else if (!publish_message_ex(&members[i], "chat", "text", body, reply_to, reply_text))
                     send_error(c, "room_storage_failed", "消息未保存，请重试");
                 else bot_mention(&members[i], body);
             } else if (!strcmp(type, "sticker")) {
@@ -716,10 +745,83 @@ void room_message(Client *c, const char *text, size_t len) {
                     cJSON_AddStringToObject(out, "name", name);
                     broadcast(r, out);
                 }
+            } else if (!strcmp(type, "transfer")) {
+                const char *target = string_field(j, "target");
+                int next_owner = find_room_member(r, target);
+                if (!members[i].owner) send_error(c, "forbidden", "只有房主可以转让房主权限");
+                else if (!target || !valid_string(target, 48, 1) || next_owner < 0 || next_owner == i)
+                    send_error(c, "member_not_found", "未找到可接任的房间成员");
+                else if (!room_store_set_owner(rooms[r].instance, members[i].nickname, members[next_owner].nickname))
+                    send_error(c, "room_storage_failed", "暂时无法转让房主权限");
+                else {
+                    members[i].owner = 0;
+                    members[next_owner].owner = 1;
+                    log_room_event(&rooms[r], "transfer", members[i].nickname, "target", members[next_owner].nickname);
+                    cJSON *out = event("owner_changed");
+                    cJSON_AddStringToObject(out, "owner", members[next_owner].nickname);
+                    cJSON_AddStringToObject(out, "from", members[i].nickname);
+                    broadcast(r, out);
+                    online_list(r);
+                }
+            } else if (!strcmp(type, "extend")) {
+                if (!members[i].owner) send_error(c, "forbidden", "只有房主可以延长房间时间");
+                else {
+                    time_t now = time(NULL);
+                    time_t max_ttl = room_ttl > 604800 ? (time_t)room_ttl : (time_t)604800;
+                    time_t cap = now + max_ttl;
+                    time_t base = rooms[r].expires > now ? rooms[r].expires : now;
+                    time_t next_expires = base + 7200;
+                    if (next_expires > cap) next_expires = cap;
+                    if (next_expires <= rooms[r].expires) {
+                        send_error(c, "extend_limit", "房间有效期已达到上限");
+                    } else if (!room_store_extend(rooms[r].instance, next_expires)) {
+                        send_error(c, "room_storage_failed", "暂时无法延长房间时间");
+                    } else {
+                        rooms[r].expires = next_expires;
+                        log_room_event(&rooms[r], "extend", members[i].nickname, NULL, NULL);
+                        cJSON *out = event("extended");
+                        cJSON_AddNumberToObject(out, "expires", (double)next_expires);
+                        cJSON_AddStringToObject(out, "by", members[i].nickname);
+                        broadcast(r, out);
+                    }
+                }
             } else if (!strcmp(type,"history")) history_page(c, &rooms[r], string_field(j, "before"));
+            else if (!strcmp(type,"detach")) {
+                /* 暂时离开：仅断开当前连接与房间的绑定，保留成员与房主身份，不关闭房间。 */
+                log_room_event(&rooms[r], "detach", members[i].nickname, NULL, NULL);
+                members[i].connection = NULL;
+                c->member = -1;
+                cJSON *out = event("closed");
+                cJSON_AddStringToObject(out, "reason", "detached");
+                send_json(c, out);
+                online_list(r);
+            }
             else if (!strcmp(type,"close") && !members[i].owner) send_error(c,"forbidden","只有房主可以关闭房间");
             else if (members[i].owner) {
-                if (room_store_remove(rooms[r].instance)) close_room(r,!strcmp(type,"leave") ? "owner_left" : "owner_closed");
+                const char *transfer = !strcmp(type, "leave") ? string_field(j, "transfer") : NULL;
+                if (transfer) {
+                    int next_owner = find_room_member(r, transfer);
+                    if (!valid_string(transfer, 48, 1) || next_owner < 0 || next_owner == i) {
+                        send_error(c, "member_not_found", "未找到可接任的房间成员");
+                    } else if (!room_store_transfer_and_leave(rooms[r].instance, members[i].nickname, members[next_owner].nickname)) {
+                        send_error(c, "room_storage_failed", "暂时无法转让并离开，请重试");
+                    } else {
+                        char prev_name[49];
+                        strcpy(prev_name, members[i].nickname);
+                        members[next_owner].owner = 1;
+                        log_room_event(&rooms[r], "transfer_leave", prev_name, "target", members[next_owner].nickname);
+                        memset(&members[i], 0, sizeof members[i]);
+                        c->member = -1;
+                        cJSON *closed = event("closed");
+                        cJSON_AddStringToObject(closed, "reason", "left");
+                        send_json(c, closed);
+                        cJSON *changed = event("owner_changed");
+                        cJSON_AddStringToObject(changed, "owner", members[next_owner].nickname);
+                        cJSON_AddStringToObject(changed, "from", prev_name);
+                        broadcast(r, changed);
+                        online_list(r);
+                    }
+                } else if (room_store_remove(rooms[r].instance)) close_room(r,!strcmp(type,"leave") ? "owner_left" : "owner_closed");
                 else send_error(c, "room_storage_failed", "暂时无法关闭房间，请重试");
             }
             else if (!room_store_remove_member(rooms[r].instance, members[i].nickname))

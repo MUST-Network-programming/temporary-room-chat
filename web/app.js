@@ -15,6 +15,15 @@ const iconPaths = {
   smile:
     '<circle cx="12" cy="12" r="9"/><path d="M8 14a4 4 0 0 0 8 0M8 8.5h.01M16 8.5h.01"/>',
   send: '<path d="m21 3-7 18-4-7-7-4 18-7ZM10 14 21 3"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  reply: '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
 };
 for (const element of document.querySelectorAll("[data-icon]")) {
   const path = iconPaths[element.dataset.icon];
@@ -39,8 +48,8 @@ function applyTheme() {
     (themeControl.value === "system" && colorScheme.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.querySelector('meta[name="theme-color"]').content = dark
-    ? "#171717"
-    : "#ffffff";
+    ? "#09090b"
+    : "#fafafa";
 }
 themeControl.addEventListener("change", () => {
   applyTheme();
@@ -149,6 +158,38 @@ try {
       )
       .slice(0, 5);
 } catch (_) {}
+const mobileNavMedia = matchMedia("(max-width: 768px)");
+function setNavOpen(open) {
+  const active = Boolean(open) && mobileNavMedia.matches;
+  $("app-shell").classList.toggle("nav-open", active);
+  $("nav-toggle")?.setAttribute("aria-expanded", String(active));
+  const backdrop = $("nav-backdrop");
+  if (backdrop) backdrop.hidden = !active;
+}
+$("nav-toggle")?.addEventListener("click", () => {
+  setNavOpen(!$("app-shell").classList.contains("nav-open"));
+});
+$("nav-close")?.addEventListener("click", () => setNavOpen(false));
+$("nav-backdrop")?.addEventListener("click", () => setNavOpen(false));
+mobileNavMedia.addEventListener("change", (event) => {
+  if (!event.matches) setNavOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $("app-shell").classList.contains("nav-open")) {
+    setNavOpen(false);
+    $("nav-toggle")?.focus();
+  }
+});
+
+function avatarTone(seed) {
+  const str = String(seed || "");
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return `avatar-tone-${hash % 8}`;
+}
+
 function renderRecent() {
   const select = $("recent");
   select.replaceChildren(new Option("选择最近房间", ""));
@@ -160,7 +201,7 @@ function renderRecent() {
   $("recent-empty").hidden = visibleRooms > 0;
   $("recent-empty").textContent = recent.length
     ? "没有匹配的房间。试试其他名称或加入码。"
-    : "还没有最近房间。";
+    : "还没有最近房间，加入或创建一个开始聊天。";
   $("room-recent-list").replaceChildren(
     ...recent.map((item) => {
       const entry = document.createElement("li");
@@ -168,8 +209,8 @@ function renderRecent() {
       button.className = "recent-button";
       button.type = "button";
       const avatar = document.createElement("span");
-      avatar.className = "recent-avatar";
-      avatar.textContent = "#";
+      avatar.className = `recent-avatar ${avatarTone(item.room + item.name)}`;
+      avatar.textContent = Array.from(item.name || "#").slice(0, 1).join("").toUpperCase();
       const text = document.createElement("span");
       text.className = "recent-text";
       const title = document.createElement("strong");
@@ -181,6 +222,7 @@ function renderRecent() {
       if (item.room === session?.room)
         button.setAttribute("aria-current", "page");
       button.addEventListener("click", () => {
+        setNavOpen(false);
         if (session) {
           notice(
             item.room === session.room
@@ -190,8 +232,16 @@ function renderRecent() {
           return;
         }
         $("room-code").value = item.room;
+        const saved = detachedTokens[item.room];
+        if (!authRequired && saved?.nickname && !$("nickname").value.trim()) {
+          $("nickname").value = saved.nickname;
+        }
         $("room-code").focus();
-        notice("已填入房间码，确认昵称后加入。");
+        notice(
+          saved
+            ? "已填入房间码与上次身份，点击加入即可恢复房主/成员会话。"
+            : "已填入房间码，确认昵称后加入。",
+        );
       });
       entry.append(button);
       entry.hidden = !matchesRoomSearch(item);
@@ -213,6 +263,7 @@ function syncWorkspace() {
   $("loading-panel").hidden = authRequired !== null;
 }
 $("lobby-nav").addEventListener("click", () => {
+  setNavOpen(false);
   if (session) {
     notice("你正在房间中，离开后即可返回大厅。");
     return;
@@ -222,6 +273,7 @@ $("lobby-nav").addEventListener("click", () => {
 function setRoomName(name) {
   $("room-name").textContent = name;
   syncWorkspace();
+  updateDocumentTitle();
   recent = [
     { room: session.room, name },
     ...recent.filter((item) => item.room !== session.room),
@@ -277,6 +329,32 @@ function restoreRoom() {
   );
 }
 const storageKey = "temporary-chat-session";
+const detachedKey = "temporary-chat-detached";
+let detachedTokens = {};
+try {
+  const saved = JSON.parse(sessionStorage.getItem(detachedKey));
+  if (saved && typeof saved === "object") detachedTokens = saved;
+} catch (_) {}
+function saveDetachedTokens() {
+  try {
+    sessionStorage.setItem(detachedKey, JSON.stringify(detachedTokens));
+  } catch (_) {}
+}
+function rememberDetachedSession() {
+  if (!authRequired && session?.room && session?.token && session?.nickname) {
+    detachedTokens[session.room] = {
+      nickname: session.nickname,
+      token: session.token,
+    };
+    saveDetachedTokens();
+  }
+}
+function forgetDetachedSession(roomCode) {
+  if (roomCode && detachedTokens[roomCode]) {
+    delete detachedTokens[roomCode];
+    saveDetachedTokens();
+  }
+}
 let socket,
   retryTimer,
   heartbeatTimer,
@@ -319,7 +397,7 @@ function notice(text = "") {
     element.hidden = element !== target || !text;
   }
 }
-const compactRoom = matchMedia("(max-width: 680px)");
+const compactRoom = matchMedia("(max-width: 768px)");
 function showRoomInfo(expanded) {
   $("room-info").setAttribute("aria-expanded", String(expanded));
   $("room-sidebar").classList.toggle("expanded", expanded);
@@ -329,6 +407,10 @@ function showRoomInfo(expanded) {
 $("room-info").addEventListener("click", () => {
   const expanded = $("room-info").getAttribute("aria-expanded") === "true";
   showRoomInfo(!expanded);
+});
+$("room-sidebar-close")?.addEventListener("click", () => {
+  showRoomInfo(false);
+  $("room-info").focus();
 });
 function resizeDraft() {
   const input = $("message");
@@ -353,6 +435,8 @@ function controls() {
   $("create").disabled = $("join").disabled = !online || !allowed || pending;
   $("send").disabled = !online || !joined || !$("message").value.trim();
   $("rename").disabled = !online || !joined;
+  $("extend-room").disabled = !online || !joined;
+  $("expiry-banner-extend").disabled = !online || !joined;
   $("leave").disabled = !online || !joined;
   $("close-room").disabled = !online || !joined;
 }
@@ -372,6 +456,22 @@ function resetRoom(message) {
   resetNoticeDraft();
   if (!account && noticeDialog.open) noticeDialog.close();
   hideBotMention();
+  clearReply();
+  const ld = $("leave-dialog");
+  if (ld?.open) {
+    if (typeof ld.close === "function") ld.close();
+    else ld.open = false;
+  }
+  roomMembers = [];
+  roomOwnerName = "";
+  roomExpiresAt = 0;
+  stopExpiryCountdown();
+  $("expiry-banner").hidden = true;
+  $("extend-room").hidden = true;
+  $("export-itinerary-ics").hidden = true;
+  hiddenUnread = 0;
+  scrolledUnread = 0;
+  updateLatestButton();
   assistantToken = ""; itineraryOwner = false; itineraryData = null; pinnedVersion = null;
   closeItinerary();
   $("pinned-itinerary").hidden = true;
@@ -384,6 +484,7 @@ function resetRoom(message) {
   persist();
   $("room-view").hidden = true;
   showLobby();
+  updateDocumentTitle();
   showRoomInfo(false);
   $("room-settings").open = false;
   showRenameForm(false);
@@ -400,6 +501,101 @@ const latestButton = $("latest");
 const olderButton = $("older-messages");
 let followingLatest = true;
 let historyBefore = "";
+let hiddenUnread = 0;
+let scrolledUnread = 0;
+let roomMembers = [];
+let roomOwnerName = "";
+let roomExpiresAt = 0;
+let expiryTimer = null;
+let activeReply = null;
+const notifyKey = "temporary-chat-notify";
+let notifyEnabled = false;
+try {
+  notifyEnabled = localStorage.getItem(notifyKey) === "1";
+} catch (_) {}
+
+function syncNotifyButton() {
+  const button = $("notify-toggle");
+  const label = $("notify-toggle-label");
+  if (!button || !label) return;
+  const supported = typeof Notification !== "undefined";
+  const granted = supported && Notification.permission === "granted";
+  const active = notifyEnabled && granted;
+  button.hidden = !supported;
+  button.setAttribute("aria-pressed", String(active));
+  label.textContent = active ? "桌面通知：开" : "桌面通知：关";
+}
+$("notify-toggle")?.addEventListener("click", async () => {
+  if (typeof Notification === "undefined") return;
+  if (notifyEnabled && Notification.permission === "granted") {
+    notifyEnabled = false;
+    try { localStorage.setItem(notifyKey, "0"); } catch (_) {}
+    syncNotifyButton();
+    notice("已关闭桌面新消息通知。");
+    return;
+  }
+  let perm = Notification.permission;
+  if (perm === "default") {
+    try { perm = await Notification.requestPermission(); } catch (_) { perm = "denied"; }
+  }
+  if (perm === "granted") {
+    notifyEnabled = true;
+    try { localStorage.setItem(notifyKey, "1"); } catch (_) {}
+    syncNotifyButton();
+    notice("已开启后台桌面通知。");
+  } else {
+    notifyEnabled = false;
+    syncNotifyButton();
+    notice("浏览器未授予通知权限，请在地址栏设置中允许通知。");
+  }
+});
+syncNotifyButton();
+
+function updateDocumentTitle() {
+  const base = joined ? `${$("room-name").textContent} · 同行` : "同行 · 临时聊天室";
+  document.title = joined && hiddenUnread > 0 ? `(${hiddenUnread}) ${base}` : base;
+}
+
+function clearHiddenUnread() {
+  if (!hiddenUnread) return;
+  hiddenUnread = 0;
+  updateDocumentTitle();
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) clearHiddenUnread();
+});
+window.addEventListener("focus", clearHiddenUnread);
+
+function maybeDesktopNotify(sender, body, mentioned) {
+  if (!joined || !document.hidden) return;
+  if (sender && session && sender === session.nickname) return;
+  hiddenUnread += 1;
+  updateDocumentTitle();
+  if (
+    !notifyEnabled ||
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  )
+    return;
+  try {
+    const title = mentioned
+      ? `[有人@你] ${$("room-name").textContent}`
+      : $("room-name").textContent;
+    const n = new Notification(title, {
+      body: sender ? `${sender}: ${body}` : body,
+      tag: `room-${session?.room || "chat"}`,
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch (_) {}
+}
+
+function updateLatestButton() {
+  latestButton.textContent =
+    scrolledUnread > 0 ? `↓ ${scrolledUnread} 条新消息` : "回到最新";
+}
 
 function showHistoryButton(before) {
   historyBefore = before || "";
@@ -416,6 +612,8 @@ olderButton.addEventListener("click", () => {
 
 function scrollToLatest() {
   followingLatest = true;
+  scrolledUnread = 0;
+  updateLatestButton();
   messageList.scrollTop = messageList.scrollHeight;
   latestButton.hidden = true;
 }
@@ -425,6 +623,10 @@ messageList.addEventListener("scroll", () => {
       messageList.scrollTop -
       messageList.clientHeight <=
     24;
+  if (followingLatest) {
+    scrolledUnread = 0;
+    updateLatestButton();
+  }
   latestButton.hidden = followingLatest;
 });
 latestButton.addEventListener("click", () => {
@@ -440,11 +642,39 @@ function syncConversationIntro() {
     messageList.querySelector(".chat-message"),
   );
 }
-function appendMessage(node) {
+// 同一发送者 3 分钟内的连续消息合并显示（隐藏重复头像与昵称），只影响样式。
+function regroupMessages() {
+  let prev = null;
+  for (const node of messageList.children) {
+    if (!node.classList.contains("chat-message")) {
+      prev = null;
+      continue;
+    }
+    const grouped =
+      prev &&
+      prev.dataset.sender === node.dataset.sender &&
+      Math.abs(Number(node.dataset.time) - Number(prev.dataset.time)) < 180000;
+    node.classList.toggle("grouped", Boolean(grouped));
+    prev = node;
+  }
+}
+function messageTime(data) {
+  const seconds = Number(data.time);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : Date.now();
+}
+function appendMessage(node, countAsUnread = false) {
   messageList.append(node);
+  regroupMessages();
   syncConversationIntro();
-  if (followingLatest) scrollToLatest();
-  else latestButton.hidden = false;
+  if (followingLatest) {
+    scrollToLatest();
+  } else {
+    if (countAsUnread) {
+      scrolledUnread += 1;
+      updateLatestButton();
+    }
+    latestButton.hidden = false;
+  }
 }
 function systemMessage(text) {
   const p = document.createElement("p");
@@ -454,7 +684,7 @@ function systemMessage(text) {
 }
 function makeAvatar(name, className) {
   const avatar = document.createElement("span");
-  avatar.className = className;
+  avatar.className = `${className} ${avatarTone(name)}`;
   avatar.textContent = Array.from(name || "?")
     .slice(0, 1)
     .join("")
@@ -462,34 +692,117 @@ function makeAvatar(name, className) {
   avatar.setAttribute("aria-hidden", "true");
   return avatar;
 }
+function truncateUtf8(str, maxBytes) {
+  const clean = String(str || "").replace(/\s+/g, " ").trim();
+  let out = "";
+  for (const ch of clean) {
+    if (bytes(out + ch) > maxBytes - 3) return out + "…";
+    out += ch;
+  }
+  return out;
+}
+function setReply(nickname, snippet) {
+  const clean = truncateUtf8(snippet, 180);
+  if (!nickname || !clean) return;
+  activeReply = { nickname, text: clean };
+  $("reply-preview-name").textContent = `回复 ${nickname}`;
+  $("reply-preview-text").textContent = clean;
+  $("reply-preview").hidden = false;
+  $("message").focus({ preventScroll: true });
+}
+function clearReply() {
+  activeReply = null;
+  if ($("reply-preview")) $("reply-preview").hidden = true;
+}
+$("reply-cancel")?.addEventListener("click", () => {
+  clearReply();
+  $("message").focus({ preventScroll: true });
+});
+
+function mentionsSelf(text) {
+  if (!session?.nickname || !text) return false;
+  const escaped = session.nickname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`[@＠]${escaped}(?=$|[\\s，。！？、：；,.!?:;])`).test(text);
+}
+
 function chatArticle(data) {
   const article = document.createElement("article");
-  article.className = `chat-message${session && data.nickname === session.nickname ? " own" : ""}`;
+  const isOwn = Boolean(session && data.nickname === session.nickname);
+  const mentioned = !isOwn && data.type === "chat" && mentionsSelf(data.text);
+  article.className = `chat-message${isOwn ? " own" : ""}${mentioned ? " is-mentioned" : ""}`;
+  const sentAt = messageTime(data);
+  article.dataset.sender = data.nickname;
+  article.dataset.time = String(sentAt);
+  article.dataset.kind = data.type;
   const name = document.createElement("p");
   name.className = "message-name";
-  name.textContent = data.nickname;
+  const who = document.createElement("span");
+  who.className = "message-sender";
+  who.textContent = data.nickname;
+  name.append(who);
   if (data.bot === true) {
     const badge = document.createElement("span");
     badge.className = "bot-badge";
     badge.textContent = "机器人";
     name.append(badge);
   }
+  const stamp = document.createElement("time");
+  stamp.className = "message-time";
+  stamp.dateTime = new Date(sentAt).toISOString();
+  stamp.textContent = new Date(sentAt).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  name.append(stamp);
   const text = document.createElement("p");
   text.className = "message-text";
-  text.textContent = data.type === "sticker" ? stickers[data.id] : data.text;
+  const displayContent = data.type === "sticker" ? stickers[data.id] : data.text;
+  text.textContent = displayContent;
   if (data.type === "sticker") {
     text.classList.add("sticker-message");
     text.setAttribute("aria-label", stickerNames[data.id] || "贴图");
   }
   const body = document.createElement("div");
   body.className = "message-body";
-  body.append(name, text);
+  body.append(name);
+  if (data.reply_to && data.reply_text) {
+    const quote = document.createElement("div");
+    quote.className = "message-quote";
+    const qWho = document.createElement("strong");
+    qWho.textContent = data.reply_to;
+    const qText = document.createElement("span");
+    qText.textContent = data.reply_text;
+    quote.append(qWho, qText);
+    article.dataset.replyTo = data.reply_to;
+    article.dataset.replyText = data.reply_text;
+    body.append(quote);
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "message-bubble-wrap";
+  wrap.append(text);
+  const replyBtn = document.createElement("button");
+  replyBtn.type = "button";
+  replyBtn.className = "reply-trigger";
+  replyBtn.setAttribute("aria-label", `引用回复 ${data.nickname}`);
+  replyBtn.setAttribute("data-tip", "引用回复");
+  replyBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    iconPaths.reply +
+    "</svg>";
+  const snippet =
+    data.type === "sticker"
+      ? `[贴图：${stickerNames[data.id] || "表情"}]`
+      : data.text;
+  replyBtn.addEventListener("click", () => setReply(data.nickname, snippet));
+  wrap.append(replyBtn);
+  body.append(wrap);
   if (data.nickname === "行程助手" && data.type === "chat") {
     const version = itineraryVersionOf(data.text);
     if (version != null) {
       const label = document.createElement("p");
       label.className = "itinerary-version-label";
-      body.insertBefore(label, text);
+      body.insertBefore(label, wrap);
       article.classList.add("itinerary-announcement");
       article.dataset.itineraryVersion = String(version);
     }
@@ -509,9 +822,102 @@ function prependHistory(messages, before) {
   if (anchor) anchor.before(page);
   else messageList.append(page);
   showHistoryButton(before);
+  regroupMessages();
   if (anchor) messageList.scrollTop += anchor.getBoundingClientRect().top - offset;
   syncConversationIntro();
   syncItineraryLabels();
+}
+
+function syncOwnerControls() {
+  if (!session) return;
+  $("identity").textContent = `${session.nickname}${itineraryOwner ? " · 房主" : ""}`;
+  $("close-room").hidden = !itineraryOwner;
+  $("rename").hidden = !itineraryOwner;
+  $("extend-room").hidden = !itineraryOwner;
+  $("expiry-banner-extend").hidden = !itineraryOwner;
+  $("notice-publish-open").hidden = !account || !itineraryOwner || !assistantEnabled;
+  if (!itineraryOwner) showRenameForm(false);
+}
+
+function formatRemaining(seconds) {
+  if (seconds <= 0) return "即将关闭";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function renderExpiry() {
+  if (!joined || !roomExpiresAt) {
+    $("expiry-banner").hidden = true;
+    return;
+  }
+  const remaining = Math.max(0, Math.floor(roomExpiresAt - Date.now() / 1000));
+  const at = new Date(roomExpiresAt * 1000).toLocaleString("zh-CN");
+  $("expiry").textContent = `剩余 ${formatRemaining(remaining)} · 到期 ${at}`;
+  const warn = remaining <= 900;
+  $("expiry-banner").hidden = !warn;
+  if (warn) {
+    $("expiry-banner-text").textContent =
+      remaining > 0
+        ? `房间将在 ${formatRemaining(remaining)} 后到期自动关闭`
+        : "房间即将到期关闭";
+    $("expiry-banner-extend").hidden = !itineraryOwner;
+  }
+}
+
+function stopExpiryCountdown() {
+  clearInterval(expiryTimer);
+  expiryTimer = null;
+}
+
+function startExpiryCountdown(expiresSec) {
+  roomExpiresAt = Number(expiresSec) || 0;
+  stopExpiryCountdown();
+  renderExpiry();
+  if (roomExpiresAt) expiryTimer = setInterval(renderExpiry, 1000);
+}
+
+function renderMembers() {
+  $("members").replaceChildren();
+  for (const name of roomMembers) {
+    const li = document.createElement("li");
+    const avatar = makeAvatar(name, "member-avatar");
+    const label = document.createElement("span");
+    label.textContent = name;
+    li.append(avatar, label);
+    const tags = document.createElement("span");
+    tags.className = "member-tags";
+    if (name === roomOwnerName) {
+      const ownerTag = document.createElement("small");
+      ownerTag.className = "member-owner-badge";
+      ownerTag.textContent = "房主";
+      tags.append(ownerTag);
+    }
+    if (name === session?.nickname) {
+      const self = document.createElement("small");
+      self.className = "member-self";
+      self.textContent = "你";
+      tags.append(self);
+    } else if (itineraryOwner) {
+      const transferBtn = document.createElement("button");
+      transferBtn.type = "button";
+      transferBtn.className = "member-transfer-btn secondary";
+      transferBtn.textContent = "设为房主";
+      transferBtn.setAttribute("aria-label", `将房主转让给 ${name}`);
+      transferBtn.addEventListener("click", () => {
+        if (!confirm(`确认将房主权限转让给「${name}」？转让后你将变为普通成员。`)) return;
+        send({ type: "transfer", target: name });
+      });
+      tags.append(transferBtn);
+    }
+    if (tags.childElementCount) li.append(tags);
+    $("members").append(li);
+  }
+  $("member-count").textContent = String(roomMembers.length);
 }
 
 function onMessage(event) {
@@ -565,16 +971,16 @@ function onMessage(event) {
       attempts = 0;
       persist();
       noticeCards.clear();
+      clearReply();
+      hiddenUnread = 0;
+      scrolledUnread = 0;
+      updateLatestButton();
+      if (itineraryOwner) roomOwnerName = data.nickname;
       $("lobby").hidden = true;
       $("room-view").hidden = false;
       $("room-id").textContent = data.room;
-      $("identity").textContent =
-        `${data.nickname}${data.owner ? " · 房主" : ""}`;
-      $("close-room").hidden = !data.owner;
-      $("expiry").textContent =
-        `房间到期：${new Date(data.expires * 1000).toLocaleString("zh-CN")}`;
-      $("rename").hidden = !data.owner;
-      $("notice-publish-open").hidden = !account || !data.owner || !assistantEnabled;
+      syncOwnerControls();
+      startExpiryCountdown(data.expires);
       $("notice-room-contact").hidden = !account || !assistantEnabled;
       setRoomName(data.name || "同行房间");
       followingLatest = true;
@@ -593,23 +999,33 @@ function onMessage(event) {
       break;
     }
     case "members":
-      $("members").replaceChildren();
+      if (typeof data.owner === "string") roomOwnerName = data.owner;
       if (Array.isArray(data.members)) {
-        for (const name of data.members) {
-          const li = document.createElement("li");
-          const avatar = makeAvatar(name, "member-avatar");
-          const label = document.createElement("span");
-          label.textContent = name;
-          li.append(avatar, label);
-          if (name === session?.nickname) {
-            const self = document.createElement("small");
-            self.className = "member-self";
-            self.textContent = "你";
-            li.append(self);
-          }
-          $("members").append(li);
-        }
-        $("member-count").textContent = String(data.members.length);
+        roomMembers = data.members.slice();
+        renderMembers();
+      }
+      break;
+    case "owner_changed": {
+      const nextOwner = data.owner || "";
+      roomOwnerName = nextOwner;
+      itineraryOwner = Boolean(session && nextOwner === session.nickname);
+      syncOwnerControls();
+      renderMembers();
+      renderExpiry();
+      if (itineraryOwner) refreshItinerary(true);
+      systemMessage(
+        itineraryOwner
+          ? `${data.from ? data.from + " 已将房主转让给你。" : "你已成为新房主。"}`
+          : `${data.from ? data.from + " 已将房主转让给 " : "房主已变更为 "}${nextOwner}。`,
+      );
+      break;
+    }
+    case "extended":
+      if (typeof data.expires === "number") {
+        startExpiryCountdown(data.expires);
+        systemMessage(
+          `${data.by ? data.by + " " : ""}已将房间有效期延长至 ${new Date(data.expires * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}。`,
+        );
       }
       break;
     case "renamed":
@@ -620,7 +1036,10 @@ function onMessage(event) {
       break;
     case "sticker":
     case "chat": {
-      appendMessage(chatArticle(data));
+      const isOwn = Boolean(session && data.nickname === session.nickname);
+      appendMessage(chatArticle(data), !isOwn);
+      const preview = data.type === "sticker" ? `[贴图：${stickerNames[data.id] || "表情"}]` : data.text;
+      maybeDesktopNotify(data.nickname, preview, !isOwn && data.type === "chat" && mentionsSelf(data.text));
       syncItineraryLabels();
       if (invokeRequested && data.nickname === session?.nickname && data.text?.includes("@行程助手")) {
         invokeRequested = false; generateItinerary();
@@ -630,17 +1049,25 @@ function onMessage(event) {
     }
     case "notice":
       displayNoticeCard(data);
+      maybeDesktopNotify("重要通知", data.title || data.text, false);
       break;
     case "closed":
+      if (data.reason === "detached") rememberDetachedSession();
+      else if (session?.room) forgetDetachedSession(session.room);
       resetRoom(
-        data.reason === "left" || (data.reason === "owner_left" && itineraryOwner)
-          ? "已离开房间。"
-          : data.reason === "expired"
-            ? "房间已到期。"
-            : "房间已关闭。",
+        data.reason === "detached"
+          ? "已暂时离开房间，房主身份已保留，可随时从「最近房间」返回。"
+          : data.reason === "left" || (data.reason === "owner_left" && itineraryOwner)
+            ? "已离开房间。"
+            : data.reason === "expired"
+              ? "房间已到期。"
+              : "房间已关闭。",
       );
       break;
     case "error":
+      if (data.code === "invalid_token" || data.code === "room_not_found") {
+        forgetDetachedSession($("room-code").value.trim().toUpperCase());
+      }
       if (olderButton.disabled &&
           ["history_read_failed", "history_unavailable", "invalid_history"].includes(data.code)) {
         showHistoryButton(historyBefore);
@@ -732,11 +1159,18 @@ function enter(type) {
   }
   notice();
   pending = true;
+  const savedDetached =
+    !authRequired && type === "join" ? detachedTokens[room] : null;
+  const resumeToken =
+    savedDetached && savedDetached.nickname === nickname
+      ? savedDetached.token
+      : undefined;
   if (
     !send({
       type,
       ...(authRequired ? {} : { nickname }),
       ...(type === "join" ? { room } : {}),
+      ...(resumeToken ? { token: resumeToken } : {}),
     })
   ) {
     pending = false;
@@ -917,13 +1351,19 @@ $("message-form").addEventListener("submit", (e) => {
     notice("消息太长，请控制在 2048 个 UTF-8 字节以内（约 682 个汉字）。");
     return;
   }
-  if (joined && send({ type: "chat", text })) {
+  const payload = { type: "chat", text };
+  if (activeReply) {
+    payload.reply_to = activeReply.nickname;
+    payload.reply_text = activeReply.text;
+  }
+  if (joined && send(payload)) {
     if (text.includes("@行程助手")) {
       if (itineraryOwner) invokeRequested = true;
       else notice("只有房主可以触发行程草稿。");
     }
     scrollToLatest();
     $("message").value = "";
+    clearReply();
     hideBotMention();
     draftChanged();
     showExpressions(false);
@@ -937,10 +1377,31 @@ $("message").addEventListener("input", () => {
 });
 window.addEventListener("resize", resizeDraft);
 $("message").addEventListener("keydown", (event) => {
-  if (mentionRange && !event.isComposing && ["Tab", "Enter", "Escape"].includes(event.key) && !event.shiftKey) {
+  if (mentionRange && !event.isComposing && !event.shiftKey) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideBotMention();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (mentionCandidates.length) {
+        mentionIndex =
+          (mentionIndex + (event.key === "ArrowDown" ? 1 : -1) + mentionCandidates.length) %
+          mentionCandidates.length;
+        renderMentionPicker();
+      }
+      return;
+    }
+    if (event.key === "Tab" || event.key === "Enter") {
+      event.preventDefault();
+      insertBotMention();
+      return;
+    }
+  }
+  if (event.key === "Escape" && activeReply) {
     event.preventDefault();
-    if (event.key === "Escape") hideBotMention();
-    else insertBotMention();
+    clearReply();
     return;
   }
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -948,24 +1409,88 @@ $("message").addEventListener("keydown", (event) => {
     if (!$("send").disabled) $("message-form").requestSubmit();
   }
 });
+const leaveDialog = $("leave-dialog");
+function closeLeaveDialog() {
+  if (!leaveDialog) return;
+  if (typeof leaveDialog.close === "function" && leaveDialog.open) leaveDialog.close();
+  else leaveDialog.open = false;
+}
+function openLeaveDialog(others, scheduled) {
+  const hasOthers = others.length > 0;
+  const select = $("transfer-select");
+  select.replaceChildren(...others.map((name) => new Option(name, name)));
+  $("leave-transfer-group").hidden = !hasOthers;
+  $("leave-transfer-confirm").hidden = !hasOthers;
+  $("leave-dialog-scheduled").textContent = scheduled;
+  $("leave-dialog-scheduled").hidden = !scheduled;
+  if (typeof leaveDialog.showModal === "function") {
+    if (!leaveDialog.open) leaveDialog.showModal();
+  } else {
+    leaveDialog.open = true;
+  }
+}
+$("leave-dialog-close")?.addEventListener("click", closeLeaveDialog);
+$("leave-cancel")?.addEventListener("click", closeLeaveDialog);
+$("leave-detach-confirm")?.addEventListener("click", () => {
+  closeLeaveDialog();
+  if (send({ type: "detach" })) $("leave").disabled = true;
+});
+$("leave-transfer-confirm")?.addEventListener("click", () => {
+  const target = $("transfer-select").value;
+  if (!target) return;
+  closeLeaveDialog();
+  if (send({ type: "leave", transfer: target })) $("leave").disabled = true;
+});
+$("leave-close-confirm")?.addEventListener("click", () => {
+  closeLeaveDialog();
+  if (send({ type: "close" })) $("leave").disabled = true;
+});
 $("leave").addEventListener("click", () => {
   const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
-  if (
-    !$("close-room").hidden &&
-    !confirm(`你是房主。离开会关闭房间，所有人都将退出。${scheduled}确认离开？`)
-  )
+  if (itineraryOwner) {
+    const others = roomMembers.filter((name) => name !== session?.nickname);
+    if (leaveDialog) {
+      openLeaveDialog(others, scheduled);
+      return;
+    }
+    if (!confirm(`你是房主。确认暂时离开房间（保留房主，不关闭房间）？${scheduled}`))
+      return;
+    if (send({ type: "detach" })) $("leave").disabled = true;
     return;
+  }
   if (send({ type: "leave" })) $("leave").disabled = true;
 });
+function requestExtendRoom() {
+  if (!joined || !itineraryOwner) return;
+  send({ type: "extend" });
+}
+$("extend-room")?.addEventListener("click", requestExtendRoom);
+$("expiry-banner-extend")?.addEventListener("click", requestExtendRoom);
 $("close-room").addEventListener("click", () => {
   const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
   if (confirm(`关闭后所有成员都会退出，加入码立即失效。${scheduled}确认关闭？`))
     send({ type: "close" });
 });
+let copyResetTimer;
 $("copy-code").addEventListener("click", async () => {
+  const button = $("copy-code");
+  const label = button.querySelector(".copy-label");
+  const defaultIcon = button.querySelector(".copy-icon-default");
+  const doneIcon = button.querySelector(".copy-icon-done");
   try {
     await navigator.clipboard.writeText($("room-id").textContent);
     notice("加入码已复制。");
+    clearTimeout(copyResetTimer);
+    button.classList.add("is-copied");
+    if (defaultIcon) defaultIcon.hidden = true;
+    if (doneIcon) doneIcon.hidden = false;
+    if (label) label.textContent = "已复制";
+    copyResetTimer = setTimeout(() => {
+      button.classList.remove("is-copied");
+      if (defaultIcon) defaultIcon.hidden = false;
+      if (doneIcon) doneIcon.hidden = true;
+      if (label) label.textContent = "复制加入码";
+    }, 1800);
   } catch (_) {
     notice(`请手动复制加入码：${$("room-id").textContent}`);
   }
@@ -1164,6 +1689,7 @@ async function refreshItinerary(force=false) {
     if (force || key!==itineraryKey) {
       itineraryKey=key; itineraryData=current;
       $("itinerary-form").hidden=!current;
+      $("export-itinerary-ics").hidden = !current || !/^\d{4}-\d{2}-\d{2}$/.test(current?.data?.date || "");
       $("itinerary-version").textContent=current ? "v"+current.version+ (current.status==="draft" ? " · 草稿，尚未发布" : " · 已确认行程") : "暂无行程";
       $("confirm-tools").hidden=!state.owner;
       for (const name of Object.keys(itineraryFields)) {
@@ -1180,8 +1706,10 @@ async function refreshItinerary(force=false) {
     }
     pinnedVersion=state.confirmed ? state.confirmed.version : null;
     syncItineraryLabels();
+    const wasFollowing = followingLatest;
     $("pinned-itinerary").hidden=!state.confirmed;
     if(state.confirmed) {const d=state.confirmed.data; $("pinned-itinerary").textContent="当前置顶 · v"+state.confirmed.version+"　"+d.date+" "+d.meeting_time+" "+d.meeting_place+"集合　→ 查看行程";}
+    if (wasFollowing) scrollToLatest();
     const sub=state.subscription;
     $("subscription-state").textContent=sub?.active ? "已订阅："+sub.email : "未订阅。仅你本人可修改订阅。";
     if(document.activeElement!==$("subscriber-email") && sub?.email) $("subscriber-email").value=sub.email;
@@ -1226,33 +1754,236 @@ setInterval(()=>refreshItinerary(),3000);
 
 const botMention = "@群聊助手";
 let mentionRange = null;
+let mentionCandidates = [];
+let mentionIndex = 0;
 
 function hideBotMention() {
   mentionRange = null;
+  mentionCandidates = [];
+  mentionIndex = 0;
   $("bot-mention-picker").hidden = true;
+}
+
+function buildMentionCandidates(query) {
+  const q = query.toLowerCase();
+  const list = [];
+  if (assistantEnabled) {
+    list.push({ label: "@群聊助手", role: "AI 助手" });
+    if (itineraryOwner) list.push({ label: "@行程助手", role: "提取行程" });
+  }
+  for (const name of roomMembers) {
+    if (session && name === session.nickname) continue;
+    list.push({
+      label: "@" + name,
+      role: name === roomOwnerName ? "房主" : "成员",
+    });
+  }
+  return list.filter((item) => item.label.slice(1).toLowerCase().includes(q));
+}
+
+function renderMentionPicker() {
+  const picker = $("bot-mention-picker");
+  picker.replaceChildren(
+    ...mentionCandidates.map((item, idx) => {
+      const btn = document.createElement("button");
+      if (idx === 0) btn.id = "bot-mention-option";
+      btn.type = "button";
+      btn.className = `secondary mention-btn${idx === mentionIndex ? " active" : ""}`;
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      const role = document.createElement("small");
+      role.className = "mention-role";
+      role.textContent = item.role;
+      btn.append(label, role);
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        mentionIndex = idx;
+        insertBotMention();
+      });
+      return btn;
+    }),
+  );
+  picker.hidden = !mentionCandidates.length;
 }
 
 function updateBotMention() {
   const input = $("message");
   const end = input.selectionStart;
   const match = /(?:^|[\s，：、])([@＠][^\s@＠]*)$/.exec(input.value.slice(0, end));
-  if (!assistantEnabled || !joined || !match || !botMention.startsWith("@" + match[1].slice(1))) {
+  if (!joined || !match) {
+    hideBotMention();
+    return;
+  }
+  const candidates = buildMentionCandidates(match[1].slice(1));
+  if (!candidates.length) {
     hideBotMention();
     return;
   }
   mentionRange = [end - match[1].length, end];
-  $("bot-mention-picker").hidden = false;
+  mentionCandidates = candidates;
+  if (mentionIndex >= candidates.length) mentionIndex = 0;
+  renderMentionPicker();
 }
 
 function insertBotMention() {
-  if (!mentionRange) return;
+  if (!mentionRange || !mentionCandidates.length) return;
+  const chosen = mentionCandidates[mentionIndex] || mentionCandidates[0];
   const input = $("message");
-  input.setRangeText(botMention + " ", ...mentionRange, "end");
+  input.setRangeText(chosen.label + " ", ...mentionRange, "end");
   hideBotMention();
   draftChanged();
   input.focus();
 }
-$("bot-mention-option").addEventListener("click", insertBotMention);
+$("bot-mention-option")?.addEventListener("click", insertBotMention);
+
+/* ---------- 到期前一键导出：.md 聊天记录 & .ics 系统日历 ---------- */
+function downloadTextFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function safeFilename(name) {
+  return String(name || "同行房间").replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "同行房间";
+}
+
+function exportChatMarkdown() {
+  if (!joined || !session) return;
+  const roomTitle = $("room-name").textContent || "同行房间";
+  const now = new Date();
+  const ymd = now.toISOString().slice(0, 10).replace(/-/g, "");
+  const lines = [
+    `# ${roomTitle}`,
+    "",
+    `- 房间码：\`${session.room}\``,
+    `- 导出时间：${now.toLocaleString("zh-CN", { hour12: false })}`,
+  ];
+  if (roomExpiresAt) {
+    lines.push(`- 房间到期：${new Date(roomExpiresAt * 1000).toLocaleString("zh-CN", { hour12: false })}`);
+  }
+  if (itineraryData?.data) {
+    const d = itineraryData.data;
+    lines.push("", `## 行程摘要（v${itineraryData.version}）`, "");
+    for (const [k, label] of Object.entries(itineraryFields)) {
+      const v = d[k];
+      if (v && v !== pendingTripValue) lines.push(`- **${label}**：${v}`);
+    }
+  }
+  lines.push("", "## 聊天记录", "");
+  for (const node of messageList.children) {
+    if (node.classList.contains("chat-message")) {
+      const sender = node.dataset.sender || "未知成员";
+      const t = node.querySelector(".message-time")?.textContent || "";
+      const body = node.querySelector(".message-text")?.textContent || "";
+      const qTo = node.dataset.replyTo;
+      const qText = node.dataset.replyText;
+      lines.push(`### ${sender}${t ? `（${t}）` : ""}`);
+      if (qTo && qText) lines.push(`> 回复 ${qTo}：${qText}`, "");
+      lines.push(body, "");
+    } else if (node.classList.contains("important-notice-card")) {
+      const h = node.querySelector("h3")?.textContent || "重要通知";
+      const p = node.querySelector("p")?.textContent || "";
+      lines.push(`> **[重要通知] ${h}**`, `> ${p.replace(/\n/g, "\n> ")}`, "");
+    }
+  }
+  downloadTextFile(
+    `${safeFilename(roomTitle)}-聊天记录-${ymd}.md`,
+    lines.join("\n"),
+    "text/markdown;charset=utf-8",
+  );
+  notice("已导出聊天记录 (.md)。");
+}
+$("export-chat")?.addEventListener("click", exportChatMarkdown);
+
+function icsEscape(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r?\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function icsStamp(dateStr, timeStr, fallbackHour = 9, addHours = 0) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || "");
+  if (!m) return null;
+  let hh = fallbackHour;
+  let mm = 0;
+  const tm = /^(\d{2}):(\d{2})/.exec(timeStr || "");
+  if (tm) {
+    hh = Number(tm[1]);
+    mm = Number(tm[2]);
+  }
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hh + addHours, mm, 0));
+  const p = (n) => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}${p(dt.getUTCMonth() + 1)}${p(dt.getUTCDate())}T${p(dt.getUTCHours())}${p(dt.getUTCMinutes())}00`;
+}
+
+function exportItineraryICS() {
+  if (!itineraryData?.data) return;
+  const d = itineraryData.data;
+  const start = icsStamp(d.date, d.meeting_time, 9, 0);
+  if (!start) {
+    itineraryNotice("行程缺少有效日期，无法导出日历。");
+    return;
+  }
+  const end =
+    (/^\d{2}:\d{2}/.test(d.regroup_time || "") && icsStamp(d.date, d.regroup_time, 11, 0)) ||
+    icsStamp(d.date, d.meeting_time, 9, 2);
+  const roomTitle = $("room-name").textContent || "同行行程";
+  const dest = d.destination && d.destination !== pendingTripValue ? d.destination : roomTitle;
+  const loc = d.meeting_place && d.meeting_place !== pendingTripValue ? d.meeting_place : "";
+  const descParts = [];
+  for (const [k, label] of Object.entries(itineraryFields)) {
+    const v = d[k];
+    if (v && v !== pendingTripValue) descParts.push(`${label}：${v}`);
+  }
+  const nowUtc = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const uid = `${session?.room || "trip"}-v${itineraryData.version}-${Date.now()}@tongxing.local`;
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//TongXing//Temporary Room Chat//ZH",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VTIMEZONE",
+    "TZID:Asia/Shanghai",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:+0800",
+    "TZOFFSETTO:+0800",
+    "TZNAME:CST",
+    "DTSTART:19700101T000000",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${nowUtc}`,
+    `DTSTART;TZID=Asia/Shanghai:${start}`,
+    `DTEND;TZID=Asia/Shanghai:${end}`,
+    `SUMMARY:${icsEscape(`${roomTitle} · ${dest}`)}`,
+    ...(loc ? [`LOCATION:${icsEscape(loc)}`] : []),
+    `DESCRIPTION:${icsEscape(descParts.join("\n"))}`,
+    "BEGIN:VALARM",
+    "TRIGGER:-PT30M",
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${icsEscape(`集合提醒：${dest}`)}`,
+    "END:VALARM",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  downloadTextFile(
+    `${safeFilename(roomTitle)}-行程v${itineraryData.version}.ics`,
+    ics,
+    "text/calendar;charset=utf-8",
+  );
+  itineraryNotice("已导出日历文件 (.ics)，打开即可添加到系统日历。");
+}
+$("export-itinerary-ics")?.addEventListener("click", exportItineraryICS);
 
 const noticeDialog = $("notice-dialog");
 const noticeCards = new Map();
@@ -1298,7 +2029,7 @@ function displayNoticeCard(data, page) {
   card.replaceChildren(tag, title, body, timing);
   if (isNew) {
     if (page) page.append(card);
-    else appendMessage(card);
+    else appendMessage(card, true);
   }
 }
 

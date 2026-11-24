@@ -107,8 +107,50 @@ int room_store_remove_member(const char *instance, const char *name) {
     return write_text("DELETE FROM members WHERE room=? AND name=?", instance, name);
 }
 
+int room_store_set_owner(const char *instance, const char *old_owner, const char *new_owner) {
+    if (!store) return 1;
+    if (!exec_sql("BEGIN IMMEDIATE")) return 0;
+    sqlite3_stmt *s1 = prepare("UPDATE members SET owner=0 WHERE room=? AND name=?");
+    int ok1 = s1 && bind_text(s1, 1, instance) && bind_text(s1, 2, old_owner) &&
+              sqlite3_step(s1) == SQLITE_DONE;
+    sqlite3_finalize(s1);
+    sqlite3_stmt *s2 = ok1 ? prepare("UPDATE members SET owner=1 WHERE room=? AND name=?") : NULL;
+    int ok2 = s2 && bind_text(s2, 1, instance) && bind_text(s2, 2, new_owner) &&
+              sqlite3_step(s2) == SQLITE_DONE && sqlite3_changes(store) == 1;
+    sqlite3_finalize(s2);
+    if (ok1 && ok2 && exec_sql("COMMIT")) return 1;
+    exec_sql("ROLLBACK");
+    return 0;
+}
+
+int room_store_transfer_and_leave(const char *instance, const char *old_owner, const char *new_owner) {
+    if (!store) return 1;
+    if (!exec_sql("BEGIN IMMEDIATE")) return 0;
+    sqlite3_stmt *s1 = prepare("UPDATE members SET owner=1 WHERE room=? AND name=?");
+    int ok1 = s1 && bind_text(s1, 1, instance) && bind_text(s1, 2, new_owner) &&
+              sqlite3_step(s1) == SQLITE_DONE && sqlite3_changes(store) == 1;
+    sqlite3_finalize(s1);
+    sqlite3_stmt *s2 = ok1 ? prepare("DELETE FROM members WHERE room=? AND name=?") : NULL;
+    int ok2 = s2 && bind_text(s2, 1, instance) && bind_text(s2, 2, old_owner) &&
+              sqlite3_step(s2) == SQLITE_DONE;
+    sqlite3_finalize(s2);
+    if (ok1 && ok2 && exec_sql("COMMIT")) return 1;
+    exec_sql("ROLLBACK");
+    return 0;
+}
+
 int room_store_rename(const char *instance, const char *name) {
     return write_text("UPDATE rooms SET name=?2 WHERE instance=?1", instance, name);
+}
+
+int room_store_extend(const char *instance, time_t expires) {
+    if (!store) return 1;
+    sqlite3_stmt *stmt = prepare("UPDATE rooms SET expires=?2 WHERE instance=?1");
+    int ok = stmt && bind_text(stmt, 1, instance) &&
+             sqlite3_bind_int64(stmt, 2, (sqlite3_int64)expires) == SQLITE_OK &&
+             sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return ok;
 }
 
 int room_store_remove(const char *instance) {
