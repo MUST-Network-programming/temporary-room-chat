@@ -26,8 +26,13 @@ typedef struct {
     char id[33];
     unsigned revision;
 } NoticeCard;
+typedef struct Delivery {
+    cJSON *message;
+    struct Delivery *next;
+} Delivery;
 typedef struct {
     int used, has_older;
+    Delivery *deliveries;
     char code[7], name[65], instance[65];
     time_t expires;
     cJSON *history[HISTORY_LIMIT];
@@ -120,6 +125,12 @@ static void close_room(int r, const char *reason) {
         memset(&members[i], 0, sizeof members[i]);
     }
     for (unsigned i = 0; i < HISTORY_LIMIT; ++i) cJSON_Delete(rooms[r].history[i]);
+    while (rooms[r].deliveries) {
+        Delivery *next = rooms[r].deliveries->next;
+        cJSON_Delete(rooms[r].deliveries->message);
+        free(rooms[r].deliveries);
+        rooms[r].deliveries = next;
+    }
     memset(&rooms[r], 0, sizeof rooms[r]);
 }
 void room_tick(time_t now) {
@@ -221,7 +232,7 @@ static int schema(cJSON *j, const char *type) {
         if (!strcmp(type, "authenticate") && !strcmp(v->string, "token")) continue;
         if ((!strcmp(type, "create") || !strcmp(type, "join")) && !strcmp(v->string, "nickname")) continue;
         if (!strcmp(type, "join") && (!strcmp(v->string, "room") || !strcmp(v->string, "token"))) continue;
-        if (!strcmp(type, "chat") && !strcmp(v->string, "text")) continue;
+        if (!strcmp(type, "chat") && (!strcmp(v->string, "text") || !strcmp(v->string, "client_id"))) continue;
         if (!strcmp(type, "history") && !strcmp(v->string, "before")) continue;
         if (!strcmp(type, "rename") && !strcmp(v->string, "name")) continue;
         if (!strcmp(type, "sticker") && !strcmp(v->string, "id")) continue;
@@ -418,6 +429,8 @@ static void broadcast_saved_event(int r, cJSON *out) {
     broadcast(r, out);
 }
 static int publish_event(int r, cJSON *out) {
+    if (out && !cJSON_GetObjectItemCaseSensitive(out, "sent_at"))
+        cJSON_AddNumberToObject(out, "sent_at", (double)time(NULL));
     if (!out || !room_store_append(rooms[r].instance, out)) {
         cJSON_Delete(out);
         return 0;
@@ -435,6 +448,59 @@ static int publish_message(Member *member, const char *type, const char *field, 
     if (!publish_event(member->room, out)) return 0;
     log_room_event(&rooms[member->room], type, member->nickname, field, value);
     return 1;
+}
+static int valid_client_id(const char *id) {
+    if (!id || strlen(id) < 32 || strlen(id) > 64) return 0;
+    for (const unsigned char *p = (const unsigned char *)id; *p; ++p)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+              (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return 0;
+    return 1;
+}
+static void chat_error(Client *c, const char *id, const char *code, const char *message) {
+    if (!id) { send_error(c, code, message); return; }
+    cJSON *out = event("error");
+    cJSON_AddStringToObject(out, "code", code);
+    cJSON_AddStringToObject(out, "message", message);
+    cJSON_AddStringToObject(out, "client_id", id);
+    send_json(c, out);
+}
+/* 只有首次发布才广播并触发助手；重试只向发送者确认。 */
+static int publish_chat(Member *member, const char *body, const char *id) {
+    if (!id) return publish_message(member, "chat", "text", body);
+    Room *room = &rooms[member->room];
+    cJSON *out = event("chat");
+    cJSON_AddStringToObject(out, "nickname", member->nickname);
+    cJSON_AddStringToObject(out, "text", body);
+    cJSON_AddStringToObject(out, "client_id", id);
+    cJSON_AddNumberToObject(out, "sent_at", (double)time(NULL));
+    int result = 1;
+    Delivery *entry = NULL;
+    if (room_store_enabled()) result = room_store_chat(room->instance, member->nickname, id, &out);
+    else {
+        for (Delivery *d = room->deliveries; d; d = d->next) {
+            if (strcmp(string_field(d->message, "nickname"), member->nickname) ||
+                strcmp(string_field(d->message, "client_id"), id)) continue;
+            result = strcmp(string_field(d->message, "text"), body) ? -1 : 2;
+            if (result == 2) { cJSON_Delete(out); out = cJSON_Duplicate(d->message, 1); }
+            break;
+        }
+        if (result == 1) {
+            entry = calloc(1, sizeof *entry);
+            if (entry) entry->message = cJSON_Duplicate(out, 1);
+            if (!entry || !entry->message) { free(entry); result = 0; }
+        }
+    }
+    if (result <= 0) { cJSON_Delete(out); return result; }
+    cJSON *ack = event("chat_ack");
+    cJSON_AddStringToObject(ack, "client_id", id);
+    cJSON_AddItemToObject(ack, "message", cJSON_Duplicate(out, 1));
+    if (result == 1) {
+        if (entry) { entry->next = room->deliveries; room->deliveries = entry; }
+        broadcast_saved_event(member->room, out);
+        log_room_event(room, "chat", member->nickname, "text", body);
+    } else cJSON_Delete(out);
+    send_json(member->connection, ack);
+    return result;
 }
 static int valid_sticker(const char *id) {
     return id && (!strcmp(id, "wave") || !strcmp(id, "ok") ||
@@ -646,13 +712,23 @@ static void notice_card(Client *c, cJSON *j) {
 }
 void room_message(Client *c, const char *text, size_t len) {
     room_tick(time(NULL));
-    if (!raw_valid(text,len)) { send_error(c,"invalid_json","消息为空、过长或含 NUL"); return; }
+    if (!raw_valid(text,len)) {
+        /* 对可解析但含转义 NUL 的聊天也关联错误；不接受其中的消息内容。 */
+        cJSON *invalid = len && len <= MESSAGE_CAP && !memchr(text, 0, len)
+                         ? cJSON_ParseWithLength(text, len) : NULL;
+        const char *kind = string_field(invalid, "type");
+        chat_error(c, kind && !strcmp(kind, "chat") ? string_field(invalid, "client_id") : NULL,
+                   "invalid_json", "消息为空、过长或含 NUL");
+        cJSON_Delete(invalid); return;
+    }
     const char *end = NULL;
     cJSON *j = cJSON_ParseWithLengthOpts(text,len,&end,0);
     const char *type = j ? string_field(j,"type") : NULL;
     while (end && end < text + len && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t')) ++end;
     if (!j || end != text + len || !type || !schema(j,type)) {
-        cJSON_Delete(j); send_error(c,"invalid_json","JSON 格式、字段类型或重复字段错误"); return;
+        chat_error(c, type && !strcmp(type, "chat") ? string_field(j, "client_id") : NULL,
+                   "invalid_json", "JSON 格式、字段类型或重复字段错误");
+        cJSON_Delete(j); return;
     }
     if (!strcmp(type, "assistant_rpc")) { assistant_rpc(c,j);
     } else if (!strcmp(type, "bot_watch")) {
@@ -688,15 +764,20 @@ void room_message(Client *c, const char *text, size_t len) {
     else if (!strcmp(type,"chat") || !strcmp(type,"leave") || !strcmp(type,"close") ||
              !strcmp(type,"rename") || !strcmp(type,"sticker") || !strcmp(type,"history")) {
         int i = member_of(c);
-        if (i < 0) send_error(c,"not_joined","请先加入房间");
+        if (i < 0) chat_error(c, !strcmp(type, "chat") ? string_field(j, "client_id") : NULL, "not_joined", "请先加入房间");
         else {
             int r = members[i].room;
             if (!strcmp(type,"chat")) {
                 const char *body = string_field(j,"text");
-                if (!body || !valid_string(body,2048,0)) send_error(c,"invalid_text","消息需要 1–2048 个合法 UTF-8 字节");
-                else if (!publish_message(&members[i], "chat", "text", body))
-                    send_error(c, "room_storage_failed", "消息未保存，请重试");
-                else bot_mention(&members[i], body);
+                const char *id = string_field(j, "client_id");
+                if (id && !valid_client_id(id)) chat_error(c, id, "invalid_client_id", "消息标识需要 32–64 个字母、数字、横线或下划线");
+                else if (!body || !valid_string(body,2048,0)) chat_error(c,id,"invalid_text","消息需要 1–2048 个合法 UTF-8 字节");
+                else {
+                    int published = publish_chat(&members[i], body, id);
+                    if (published == -1) chat_error(c, id, "client_id_conflict", "消息标识已用于其他内容");
+                    else if (!published) chat_error(c, id, "room_storage_failed", "消息未保存，请重试");
+                    else if (published == 1) bot_mention(&members[i], body);
+                }
             } else if (!strcmp(type, "sticker")) {
                 const char *id = string_field(j, "id");
                 if (!valid_sticker(id)) send_error(c, "invalid_sticker", "没有这个贴图");

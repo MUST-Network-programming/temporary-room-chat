@@ -6,7 +6,10 @@
     <meta name="theme-color" content="#f7f8f7" />
     <title>同行 · 临时聊天室</title>
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/invite.css" />
     <script src="/app.js" defer></script>
+    <script src="/qrcode.js" defer></script>
+    <script src="/invite.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">跳到主要内容</a>
@@ -128,6 +131,7 @@
                 退出登录
               </button>
             </div>
+            <p class="invite-context field-hint" data-invite-context role="status" hidden></p>
             <p id="signed-in" class="muted" hidden></p>
             <div id="notice-account-actions" class="notice-account-actions" hidden>
               <button id="notice-contact-open" class="secondary" type="button">通知邮箱</button>
@@ -245,7 +249,12 @@
                 >
                   <span data-icon="copy"></span>复制加入码
                 </button>
-                <p class="field-hint">邀请朋友加入这个房间</p>
+                <div class="invite-actions">
+                  <button id="copy-invite" class="secondary" type="button">复制邀请链接</button>
+                  <button id="show-invite-qr" class="secondary" type="button" aria-haspopup="dialog" aria-controls="invite-dialog">邀请二维码</button>
+                </div>
+                <p class="field-hint">邀请只包含房间码；对方需自行登录并确认加入。</p>
+                <p id="invite-copy-status" class="field-hint" role="status"></p>
               </div>
               <button id="notice-room-contact" class="secondary" type="button" hidden>绑定通知邮箱</button>
               <details id="room-settings" class="room-settings">
@@ -387,6 +396,8 @@
           >
             <h1 id="account-title">登录</h1>
             <p id="account-description">使用同行账号创建或加入临时房间。</p>
+            <p id="registration-code-source" class="field-hint">首次注册请向本次活动的组织者领取一次性注册码。房间码与注册码不同；已有账号可直接登录。若页面提供邮箱领取，也可使用邮箱获取注册码。</p>
+            <p class="invite-context field-hint" data-invite-context role="status" hidden></p>
             <form id="account-form" novalidate>
               <fieldset id="account-fields" class="account-fields" aria-label="账号信息">
                 <div class="account-row">
@@ -438,6 +449,7 @@
                   <label for="invite-code">注册码</label>
                   <input
                     id="invite-code"
+                    aria-describedby="registration-code-source"
                     name="invite"
                     maxlength="32"
                     autocomplete="off"
@@ -460,6 +472,18 @@
         </main>
       </div>
     </div>
+    <dialog id="invite-dialog" class="invite-dialog" aria-labelledby="invite-title" aria-describedby="invite-description">
+      <div class="invite-heading">
+        <h2 id="invite-title">邀请加入房间</h2>
+        <button id="invite-close" class="secondary" type="button" aria-label="关闭邀请二维码">关闭</button>
+      </div>
+      <p id="invite-description" class="field-hint">扫码后先登录，再确认加入房间。二维码在本机生成，只包含房间邀请链接。</p>
+      <div id="invite-qr" class="invite-qr"></div>
+      <label for="invite-link">邀请链接</label>
+      <input id="invite-link" class="invite-link" readonly type="text" autocomplete="off" spellcheck="false" />
+      <button id="invite-copy-link" class="secondary" type="button">复制链接</button>
+      <p id="invite-status" class="field-hint" role="status"></p>
+    </dialog>
     <dialog id="notice-dialog" aria-labelledby="notice-dialog-title">
       <div class="panel-heading">
         <h2 id="notice-dialog-title"></h2>

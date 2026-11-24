@@ -52,6 +52,10 @@ async def check():
             script = await response.text()
             assert response.status == 200 and '"eye-off"' in script and 'verification_pending' in script
             assert 'temporary-chat-navigation-collapsed' in script
+            assert 'chat_ack' in script and 'client_id' in script
+        for asset in ('invite.js', 'invite.css', 'qrcode.js'):
+            async with session.get('https://127.0.0.1/' + asset, **options) as response:
+                assert response.status == 200 and len(await response.read()) > 100
         async with session.get('https://127.0.0.1/api/register/policy', **options) as response:
             assert response.status == 200
             policy = await response.json()
@@ -79,7 +83,7 @@ if [[ $current == "$project" ]]; then
   exit 0
 fi
 case "$current" in
-  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd|/home/ubuntu/temporary-room-chat-737bb3e) ;;
+  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd|/home/ubuntu/temporary-room-chat-737bb3e|/home/ubuntu/temporary-room-chat-41238cc) ;;
   *) fail "当前部署目录未识别：$current。服务未切换，请把此行反馈。" ;;
 esac
 [[ -f $config/env && -f $accounts && -f $config/nginx.conf ]] || fail '现有配置不完整，服务未切换。'

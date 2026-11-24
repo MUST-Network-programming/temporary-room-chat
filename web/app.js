@@ -456,8 +456,12 @@ function connection(text, online = false) {
 }
 function send(data) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-  socket.send(JSON.stringify(data));
-  return true;
+  try {
+    socket.send(JSON.stringify(data));
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 function resetRoom(message) {
   noticeCards.clear();
@@ -469,6 +473,7 @@ function resetRoom(message) {
   closeItinerary();
   $("pinned-itinerary").hidden = true;
   messageList.replaceChildren(olderButton);
+  renderedMessages.clear();
   showHistoryButton("");
   session = null;
   joined = false;
@@ -492,7 +497,110 @@ const messageList = $("messages");
 const latestButton = $("latest");
 const olderButton = $("older-messages");
 let followingLatest = true;
+let leavingRoom = false;
 let historyBefore = "";
+// 待确认消息属于房间和身份；断线重连只重建界面，不丢掉发送记录。
+const pendingChats = new Map();
+const renderedMessages = new Map();
+const deliveryTimeout = 15000;
+function deliveryScope() {
+  return session ? JSON.stringify([session.room, session.nickname]) : "";
+}
+function roomPending() {
+  return [...pendingChats.values()].filter(item => item.scope === deliveryScope());
+}
+function forgetPendingRoom() {
+  for (const item of roomPending()) {
+    clearTimeout(item.timer);
+    pendingChats.delete(item.data.client_id);
+  }
+}
+function messageKeys(data) {
+  return [data.sequence != null ? "sequence:" + data.sequence : "",
+    data.message_id != null ? "id:" + data.message_id : "",
+    data.client_id ? "client:" + JSON.stringify([data.nickname, data.client_id]) : ""].filter(Boolean);
+}
+function rememberMessage(data, node) {
+  for (const key of messageKeys(data)) renderedMessages.set(key, node);
+}
+function messageDate(data) {
+  if (typeof data.sent_at !== "number" || !Number.isFinite(data.sent_at) || data.sent_at <= 0) return null;
+  const date = new Date(data.sent_at * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function regroupDates() {
+  for (const separator of messageList.querySelectorAll(".message-date")) separator.remove();
+  let previousDay = "";
+  for (const article of messageList.querySelectorAll(".chat-message")) {
+    const day = article.dataset.day || "";
+    if (day && day !== previousDay) {
+      const separator = document.createElement("p");
+      separator.className = "message-date";
+      separator.textContent = day;
+      article.before(separator);
+    }
+    previousDay = day;
+  }
+}
+function refreshPending(item) {
+  if (item.scope !== deliveryScope()) return;
+  const node = chatArticle({...item.data, delivery: item.state, deliveryError: item.error});
+  if (item.node?.isConnected) item.node.replaceWith(node);
+  else appendMessage(node);
+  item.node = node;
+  rememberMessage(item.data, node);
+}
+function failChat(item, error = "未收到服务器确认，请重试。") {
+  clearTimeout(item.timer);
+  item.state = "failed";
+  item.error = error;
+  refreshPending(item);
+}
+function transmitChat(item) {
+  if (item.scope !== deliveryScope()) return false;
+  clearTimeout(item.timer);
+  item.state = "sending";
+  item.error = "";
+  refreshPending(item);
+  if (!joined || !send({type: "chat", text: item.data.text, client_id: item.data.client_id})) {
+    failChat(item, "连接尚未恢复，请稍后重试。");
+    return false;
+  }
+  item.timer = setTimeout(() => failChat(item), deliveryTimeout);
+  return true;
+}
+function receiveChat(data, page = null) {
+  if (!joined) return;
+  const item = pendingChats.get(data.client_id);
+  const matchingPending = item && item.scope === deliveryScope() && data.nickname === session.nickname;
+  const existing = messageKeys(data).map(key => renderedMessages.get(key)).find(node => node?.isConnected || (page && node?.parentNode === page));
+  if (matchingPending) {
+    clearTimeout(item.timer);
+    pendingChats.delete(data.client_id);
+  }
+  // 已确认消息不可变；保留原节点也能维持加载历史时的滚动锚点。
+  if (existing && !matchingPending) {
+    rememberMessage(data, existing);
+    return;
+  }
+  // 同一条消息的广播、确认和历史回放，都更新同一个气泡。
+  if (existing || (matchingPending && item.node?.isConnected)) {
+    const oldNode = existing || item.node;
+    const node = chatArticle(data);
+    oldNode.replaceWith(node);
+    rememberMessage(data, node);
+  } else {
+    const node = chatArticle(data);
+    rememberMessage(data, node);
+    if (page) page.append(node);
+    else appendMessage(node);
+  }
+  if (!page) {
+    // 恢复连接时历史逐条到达，尚未确认的消息始终放在历史之后。
+    for (const unresolved of roomPending()) if (unresolved.node?.isConnected) messageList.append(unresolved.node);
+    regroupDates();
+  }
+}
 
 function showHistoryButton(before) {
   historyBefore = before || "";
@@ -577,6 +685,48 @@ function chatArticle(data) {
   const body = document.createElement("div");
   body.className = "message-body";
   body.append(name, text);
+  const date = messageDate(data);
+  const metadata = document.createElement("div");
+  metadata.className = "message-meta";
+  if (date) {
+    article.dataset.day = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+    const time = document.createElement("time");
+    time.dateTime = date.toISOString();
+    time.textContent = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    time.title = date.toLocaleString("zh-CN", {hour12: false});
+    metadata.append(time);
+  }
+  if (data.delivery) {
+    article.dataset.delivery = data.delivery;
+    const status = document.createElement("span");
+    status.className = "message-delivery";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.textContent = data.delivery === "sending" ? "发送中…" : "发送失败 · " + (data.deliveryError || "请重试");
+    metadata.append(status);
+    if (data.delivery === "failed") {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "message-retry";
+      retry.textContent = "重试";
+      retry.setAttribute("aria-label", "重新发送这条消息");
+      retry.addEventListener("click", () => {
+        const item = pendingChats.get(data.client_id);
+        if (item) transmitChat(item);
+      });
+      metadata.append(retry);
+    }
+  }
+  if (!data.delivery && data.type === "chat" && data.client_id && data.nickname === session?.nickname) {
+    article.dataset.delivery = "confirmed";
+    const confirmed = document.createElement("span");
+    confirmed.className = "message-delivery";
+    confirmed.textContent = "已确认";
+    confirmed.title = "服务器已接收这条消息，不代表其他成员已读。";
+    confirmed.setAttribute("aria-label", confirmed.title);
+    metadata.append(confirmed);
+  }
+  if (metadata.childNodes.length) body.append(metadata);
   if (data.nickname === "行程助手" && data.type === "chat") {
     const version = itineraryVersionOf(data.text);
     if (version != null) {
@@ -597,11 +747,12 @@ function prependHistory(messages, before) {
   const page = document.createDocumentFragment();
   for (const message of messages) {
     if (message.type === "notice") displayNoticeCard(message, page);
-    else page.append(chatArticle(message));
+    else receiveChat(message, page);
   }
   if (anchor) anchor.before(page);
   else messageList.append(page);
   showHistoryButton(before);
+  regroupDates();
   if (anchor) messageList.scrollTop += anchor.getBoundingClientRect().top - offset;
   syncConversationIntro();
   syncItineraryLabels();
@@ -673,6 +824,7 @@ function onMessage(event) {
       followingLatest = true;
       latestButton.hidden = true;
       messageList.replaceChildren(olderButton);
+      renderedMessages.clear();
       showHistoryButton(data.history_before);
       syncConversationIntro();
       systemMessage(
@@ -680,6 +832,10 @@ function onMessage(event) {
           ? "已恢复连接，以下是房间保留的最近消息。"
           : "已加入房间。",
       );
+      for (const item of roomPending()) {
+        item.node = null;
+        refreshPending(item);
+      }
       notice();
       draftChanged();
       if (!compactRoom.matches) $("message").focus();
@@ -711,9 +867,15 @@ function onMessage(event) {
     case "history":
       if (joined && olderButton.disabled) prependHistory(data.messages, data.before);
       break;
+    case "chat_ack":
+      if (data.message && data.message.client_id === data.client_id && data.message.nickname === session?.nickname) {
+        receiveChat(data.message);
+        syncItineraryLabels();
+      }
+      break;
     case "sticker":
     case "chat": {
-      appendMessage(chatArticle(data));
+      receiveChat(data);
       syncItineraryLabels();
       if (invokeRequested && data.nickname === session?.nickname && data.text?.includes("@行程助手")) {
         invokeRequested = false; generateItinerary();
@@ -725,6 +887,8 @@ function onMessage(event) {
       displayNoticeCard(data);
       break;
     case "closed":
+      if (leavingRoom) forgetPendingRoom();
+      leavingRoom = false;
       resetRoom(
         data.reason === "left" || (data.reason === "owner_left" && itineraryOwner)
           ? "已离开房间。"
@@ -734,6 +898,11 @@ function onMessage(event) {
       );
       break;
     case "error":
+      if (data.client_id) {
+        const item = pendingChats.get(data.client_id);
+        if (item && item.scope === deliveryScope()) failChat(item, data.message || "操作失败，请重试。");
+        break;
+      }
       if (olderButton.disabled &&
           ["history_read_failed", "history_unavailable", "invalid_history"].includes(data.code)) {
         showHistoryButton(historyBefore);
@@ -798,6 +967,7 @@ function connect() {
   socket.onclose = () => {
     const interruptedLogin = authPending && !resumingLogin;
     clearInterval(heartbeatTimer);
+    for (const item of roomPending()) failChat(item, "连接中断；恢复后可重试。");
     joined = false;
     pending = false;
     account = null;
@@ -1010,13 +1180,18 @@ $("message-form").addEventListener("submit", (e) => {
     notice("消息太长，请控制在 2048 个 UTF-8 字节以内（约 682 个汉字）。");
     return;
   }
-  if (joined && send({ type: "chat", text })) {
+  if (!joined || !session) return;
+  const draft = $("message").value;
+  const clientId = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
+  const item = {scope: deliveryScope(), data: {type: "chat", text, nickname: session.nickname, client_id: clientId}, state: "sending"};
+  pendingChats.set(clientId, item);
+  if (transmitChat(item)) {
     if (text.includes("@行程助手")) {
       if (itineraryOwner) invokeRequested = true;
       else notice("只有房主可以触发行程草稿。");
     }
     scrollToLatest();
-    $("message").value = "";
+    if ($("message").value === draft) $("message").value = "";
     hideBotMention();
     draftChanged();
     showExpressions(false);
@@ -1048,12 +1223,15 @@ $("leave").addEventListener("click", () => {
     !confirm(`你是房主。离开会关闭房间，所有人都将退出。${scheduled}确认离开？`)
   )
     return;
-  if (send({ type: "leave" })) $("leave").disabled = true;
+  if (send({ type: "leave" })) {
+    leavingRoom = true;
+    $("leave").disabled = true;
+  }
 });
 $("close-room").addEventListener("click", () => {
   const scheduled = $("notice-publish-open").hidden ? "" : "已排期的通知仍会发送。";
   if (confirm(`关闭后所有成员都会退出，加入码立即失效。${scheduled}确认关闭？`))
-    send({ type: "close" });
+    leavingRoom = send({ type: "close" });
 });
 $("copy-code").addEventListener("click", async () => {
   try {

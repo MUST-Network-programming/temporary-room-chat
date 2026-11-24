@@ -285,6 +285,19 @@ static const char *error_text(const char *error) {
     if (!strcmp(error, "name_taken")) return "用户名已注册";
     return "账号存储暂时不可用";
 }
+/* 登录校验失败也保留消息标识，前端才能停止等待并提供重试。 */
+static void access_error(Client *client, const cJSON *message, const char *type,
+                         const char *code, const char *description) {
+    const char *id = !strcmp(type, "chat") ? field(message, "client_id") : NULL;
+    if (!id) { send_error(client, code, description); return; }
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddStringToObject(out, "type", "error");
+    cJSON_AddStringToObject(out, "code", code);
+    cJSON_AddStringToObject(out, "message", description);
+    cJSON_AddStringToObject(out, "client_id", id);
+    send_json(client, out);
+}
+
 int accounts_handle(Client *client, const cJSON *message, const char *type) {
     if (!accounts_active() || !strcmp(type, "ping")) return 0;
     int registration = !strcmp(type, "register");
@@ -292,7 +305,7 @@ int accounts_handle(Client *client, const cJSON *message, const char *type) {
     int resume = !strcmp(type, "authenticate");
     int logout = !strcmp(type, "logout");
     if (!client->ssl) {
-        send_error(client, "tls_required", "请通过 HTTPS 打开聊天室");
+        access_error(client, message, type, "tls_required", "请通过 HTTPS 打开聊天室");
         return 1;
     }
     if (logout) {
@@ -338,7 +351,7 @@ int accounts_handle(Client *client, const cJSON *message, const char *type) {
     if (!client->account[0] || !find_login(client->login_token)) {
         room_disconnect(client);
         client->account[0] = client->login_token[0] = 0;
-        send_error(client, "login_required", "请先登录");
+        access_error(client, message, type, "login_required", "请先登录");
         return 1;
     }
     return 0;

@@ -56,6 +56,9 @@ void http_process(Client *c) {
     /* 固定白名单不把 URL 拼成任意文件路径，阻止目录穿越。 */
     if (!strcmp(path, "/") || !strcmp(path, "/index.html")) { filename = "index.html"; content_type = "text/html; charset=utf-8"; }
     else if (!strcmp(path, "/style.css")) { filename = "style.css"; content_type = "text/css; charset=utf-8"; }
+    else if (!strcmp(path, "/invite.js")) { filename = "invite.js"; content_type = "text/javascript; charset=utf-8"; }
+    else if (!strcmp(path, "/qrcode.js")) { filename = "qrcode.js"; content_type = "text/javascript; charset=utf-8"; }
+    else if (!strcmp(path, "/invite.css")) { filename = "invite.css"; content_type = "text/css; charset=utf-8"; }
     else if (!strcmp(path, "/app.js")) { filename = "app.js"; content_type = "text/javascript; charset=utf-8"; }
     else { http_error(c, 404, "Not Found"); return; }
     n = snprintf(asset_path, sizeof(asset_path), "%s/%s", WEB_ROOT, filename);

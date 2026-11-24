@@ -14,6 +14,8 @@ int room_store_remove_member(const char *instance, const char *name);
 int room_store_rename(const char *instance, const char *name);
 int room_store_remove(const char *instance);
 int room_store_append(const char *instance, cJSON *message);
+/* 1 new, 2 identical retry, -1 conflicting text, 0 storage failure. */
+int room_store_chat(const char *instance, const char *sender, const char *client_id, cJSON **message);
 int room_store_notice(const char *instance, const char *id, unsigned revision, cJSON *message, int *existing);
 cJSON *room_store_page(const char *instance, int64_t before, unsigned limit, int *has_older);
 

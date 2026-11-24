@@ -27,10 +27,10 @@
 
 | 功能 | 说明 |
 | --- | --- |
-| 房间码入群 | 创建房间后分享 6 位加入码；支持在线成员列表、房主改名与关闭房间。 |
-| 实时聊天 | 文本、Emoji 与内置贴图，同一房间内广播消息。 |
+| 房间码入群 | 创建房间后分享 6 位加入码、邀请链接或本地生成的二维码；支持在线成员列表、房主改名与关闭房间。 |
+| 实时聊天 | 文本、Emoji 与内置贴图，同一房间内广播消息；文本支持服务器确认、失败重试与消息 ID 去重。 |
 | 账号与邀请 | 一次性注册码注册，身份与账号绑定；同一账号重入房间时接管原连接。 |
-| 临时记录 | 账号模式默认保留房间与消息 7 天，持久保存到 SQLite；较早消息可分批加载。 |
+| 临时记录 | 账号模式默认保留房间与消息 7 天，持久保存到 SQLite；较早消息可分批加载，新消息显示时间与日期分隔。 |
 | 断线恢复 | 自动重连、恢复房间身份；断线期间保留当前页面未发送的草稿。 |
 | 桌面与手机 | 可折叠侧栏、最近房间搜索、手机抽屉菜单，以及浅色/深色主题。 |
 | HTTPS / WSS | 使用 OpenSSL 提供 TLS 传输，浏览器校验服务端证书。 |
@@ -139,12 +139,14 @@ python3 tests/accounts.py
 python3 tests/room_persistence.py
 ```
 
-界面检查需要额外安装 `jsdom` 与 `ws`，它们仅用于开发验证，应用运行不依赖 Node.js：
+界面检查需要额外安装 `jsdom`、`ws` 与 `jsqr`，它们仅用于开发验证，应用运行不依赖 Node.js：
 
 ```sh
-npm install --no-save jsdom ws
+npm install --no-save jsdom ws jsqr
 node tests/ui-navigation.cjs
 node tests/ui-register.cjs
+node tests/ui-delivery.cjs
+node tests/ui-invites.cjs
 ```
 
 邮件端到端检查可运行 `.venv/bin/python tests/bot_notices.py`。详细覆盖范围见测试脚本与[验证记录](docs/验收记录.md)。
@@ -163,4 +165,5 @@ node tests/ui-register.cjs
 
 - 使用 [cJSON](https://github.com/DaveGamble/cJSON)，第三方许可见 [cJSON-LICENSE](vendor/cJSON-LICENSE)。
 - 界面参考 [shadcn-chat](https://github.com/jakobhoeg/shadcn-chat)，相关许可见 [shadcn-chat-LICENSE](vendor/shadcn-chat-LICENSE)。
+- 邀请二维码使用本地打包的 qrcode-generator，MIT 许可保留在 [qrcode.js](web/qrcode.js) 文件头。
 - OpenSSL 与 SQLite 作为外部依赖链接。本仓库当前未提供项目级 `LICENSE`，第三方许可不代表整个项目的使用授权。

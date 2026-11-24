@@ -44,6 +44,10 @@ def main():
             a, b, member = [Peer(PORT, context) for _ in range(3)]
             a.send({'type': 'create', 'nickname': 'fake'})
             expect_error(a, 'login_required')
+            pending_id = '0123456789abcdef0123456789abcdef'
+            a.send({'type': 'chat', 'text': 'pending', 'client_id': pending_id})
+            rejected = a.until('error')
+            assert rejected['code'] == 'login_required' and rejected['client_id'] == pending_id
             a.send({'type': 'register', 'name': 'alice', 'password': PASSWORD, 'invite': invite})
             token = a.until('authenticated')['token']
             a.send({'type': 'create', 'nickname': 'fake'})

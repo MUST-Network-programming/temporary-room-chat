@@ -57,10 +57,24 @@ def run(state):
         assert not member.until('joined')['owner']
         owner.send({'type': 'rename', 'name': '七天旅行'})
         assert owner.until('renamed')['name'] == '七天旅行'
+        delivery_id = '0123456789abcdef0123456789abcdef'
+        original_confirmation = None
         for index in range(123):
             text = f'旅行消息 {index}'
-            member.send({'type': 'chat', 'text': text})
-            assert owner.until('chat')['text'] == member.until('chat')['text'] == text
+            outgoing = {'type': 'chat', 'text': text}
+            if index == 0:
+                outgoing['client_id'] = delivery_id
+            member.send(outgoing)
+            received = owner.until('chat')
+            assert received['text'] == member.until('chat')['text'] == text
+            assert isinstance(received['sent_at'], int)
+            if index == 0:
+                original_confirmation = member.until('chat_ack')['message']
+                assert original_confirmation == received
+                member.send(outgoing)
+                assert member.receive() == {'type': 'chat_ack', 'client_id': delivery_id, 'message': received}
+                owner.send({'type': 'ping'})
+                assert owner.receive()['type'] == 'pong'  # 重试没有再次广播
         owner.send({'type': 'sticker', 'id': 'wave'})
         assert owner.until('sticker')['id'] == 'wave'
         owner.close()
@@ -102,6 +116,20 @@ def run(state):
         assert member.until('error')['code'] == 'not_joined'
         member.send({'type': 'join', 'room': room['room']})
         assert not member.until('joined')['owner']
+        for _ in range(100):
+            member.receive()
+        assert member.receive()['type'] == 'members'
+        assert owner.receive()['type'] == 'members'
+        member.send({'type': 'chat', 'text': '旅行消息 0', 'client_id': delivery_id})
+        assert member.receive() == {'type': 'chat_ack', 'client_id': delivery_id, 'message': original_confirmation}
+        member.send({'type': 'chat', 'text': '更改内容', 'client_id': delivery_id})
+        conflict = member.receive()
+        assert conflict['code'] == 'client_id_conflict' and conflict['client_id'] == delivery_id
+        owner.send({'type': 'ping'})
+        assert owner.receive()['type'] == 'pong'
+        with sqlite3.connect(rooms) as db:
+            assert db.execute('SELECT count(*) FROM messages').fetchone() == (124,)
+            assert db.execute('SELECT count(*) FROM chat_deliveries').fetchone() == (1,)
         member.close()
         worker = Peer(port, context)
         worker.send({'type': 'assistant_rpc', 'secret': secret, 'token': restored['assistant_token']})
@@ -144,6 +172,7 @@ def run(state):
         with sqlite3.connect(rooms) as db:
             assert db.execute('SELECT count(*) FROM messages').fetchone() == (1,)
             assert db.execute('SELECT count(*) FROM room_notice_messages').fetchone() == (0,)
+            assert db.execute('SELECT count(*) FROM chat_deliveries').fetchone() == (0,)
             db.execute('UPDATE rooms SET expires=? WHERE code=?', (int(time.time()) - 1, expires))
     finally:
         current.terminate()
@@ -159,7 +188,7 @@ def run(state):
         assert owner.until('closed')['reason'] == 'expired'
         owner.close()
         with sqlite3.connect(rooms) as db:
-            for table in ('rooms', 'members', 'messages'):
+            for table in ('rooms', 'members', 'messages', 'chat_deliveries'):
                 assert db.execute(f'SELECT count(*) FROM {table}').fetchone() == (0,), table
     finally:
         current.terminate()
@@ -172,7 +201,7 @@ def run(state):
             assert owner.until('error')['code'] == 'room_not_found'
         owner.close()
         with sqlite3.connect(rooms) as db:
-            for table in ('rooms', 'members', 'messages'):
+            for table in ('rooms', 'members', 'messages', 'chat_deliveries'):
                 assert db.execute(f'SELECT count(*) FROM {table}').fetchone() == (0,), table
     finally:
         current.terminate()
