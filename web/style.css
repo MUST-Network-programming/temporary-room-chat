@@ -6,6 +6,7 @@
 .app-shell {
   --window-gutter: clamp(12px, 2vw, 24px);
   display: grid;
+  position: relative;
   grid-template-columns: 260px minmax(0, 1fr);
   height: calc(100dvh - var(--window-gutter) - var(--window-gutter));
   margin: var(--window-gutter);
@@ -38,6 +39,77 @@
 @media(max-width:900px){.app-shell{grid-template-columns:200px minmax(0,1fr)}.navigation{padding:16px 8px}.conversation-heading{padding:12px}.conversation-actions{gap:0}.conversation-actions button{padding:6px}.conversation-actions #leave{font-size:11px}.chat-message{max-width:85%}.composer-hint span:first-child{display:none}.composer-hint{justify-content:flex-end;padding-right:0}}
 @media(max-width:680px){.app-shell{--window-gutter:0px;grid-template-columns:60px minmax(0,1fr);border:0;border-radius:0}.navigation{gap:20px;padding:14px 6px;align-items:center}.brand{font-size:0;padding:0}.brand-mark{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid var(--border);border-radius:50%;font-size:14px}.brand-caption,.nav-section,.section-label,.search-box,.empty-recent,.nav-bottom,.recent-text{display:none}.nav-history{width:100%}.recent-button{padding:6px 0;justify-content:center}.recent-avatar{width:36px;height:36px}.topbar{padding:0 12px;height:42px}.breadcrumb{font-size:10px}.topbar-actions{gap:8px}.connection{font-size:10px}.theme-control{font-size:10px;max-width:88px}.conversation-heading{height:68px;gap:8px;padding:10px}.room-avatar{width:28px;height:28px}.conversation-title h1{font-size:13px}.conversation-title p{font-size:10px}.conversation-title p>span:nth-last-child(2),#identity{display:none}.conversation-actions button{padding:5px;min-height:32px;font-size:10px}.conversation-actions #leave{font-size:10px}.conversation-actions #room-info{display:inline-flex;width:28px}.conversation-actions #itinerary-toggle{font-size:0}.conversation-actions #itinerary-toggle:after{content:"行程";font-size:10px}.entry{padding:32px 18px}.entry-heading{margin-bottom:24px}.entry h1{font-size:20px}.entry-heading p{font-size:12px}.join-row{flex-direction:column}.join-row input{width:100%}.lobby-grid{gap:24px}#messages{padding:12px;gap:18px}.chat-message{max-width:96%;gap:6px}.message-avatar{width:24px;height:24px;font-size:10px}.message-text{padding:10px 12px;font-size:12px}.composer{padding:10px}.composer-row{gap:5px}.composer-row textarea{font-size:12px;padding-left:12px}.composer-row button{min-width:32px;width:32px;height:36px;padding:7px}.composer-hint{font-size:8px;padding-top:8px}.conversation-intro p{font-size:10px}.itinerary-panel{padding:16px}.itinerary-fields{gap:10px}.itinerary-version-label{font-size:10px;color:var(--muted);margin:0 0 6px;padding:0 2px}.itinerary-announcement.is-historical .message-text{opacity:.82}.itinerary-announcement.is-current-pin .itinerary-version-label{color:var(--ink)}.pinned-itinerary.secondary{padding:8px 12px;font-size:10px}#expression-options{left:4px;right:4px;max-width:100%;padding:12px}.form-actions{flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+.app-shell:not(.is-account).is-navigation-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.navigation-heading, .workspace-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+.workspace-heading { flex: 1; }
+.workspace-heading .breadcrumb { min-width: 0; }
+.workspace-heading .breadcrumb strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.navigation-control {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+.navigation-control:hover:not(:disabled) {
+  background: var(--soft);
+  color: var(--ink);
+  opacity: 1;
+}
+#navigation-close { display: none; }
+.navigation-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 49;
+  border: 0;
+  border-radius: 0;
+  background: #0006;
+}
+.navigation-backdrop:hover:not(:disabled) { opacity: 1; }
+.is-account .workspace-heading { display: none; }
+
+@media (max-width: 680px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .navigation {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(300px, calc(100% - 56px));
+    padding: 12px;
+    gap: 24px;
+    align-items: stretch;
+  }
+  .navigation-heading { flex-direction: row-reverse; justify-content: space-between; }
+  #navigation-close { display: inline-flex; }
+  .navigation .brand { font-size: 20px; padding: 0 8px; }
+  .navigation .brand-mark { display: none; }
+  .navigation .brand-caption { display: block; }
+  .navigation .nav-section, .navigation .nav-bottom { display: block; }
+  .navigation .section-label, .navigation .search-box { display: flex; }
+  .navigation .recent-text { display: flex; }
+  .navigation .empty-recent:not([hidden]) { display: block; }
+  .navigation .recent-button { padding: 12px 8px; justify-content: flex-start; }
+  .navigation .search-box input { font-size: 16px; }
+  .navigation .recent-text { overflow: hidden; }
+  .navigation .recent-text strong { max-width: 100%; }
+  .navigation .nav-button, .navigation .search-box input { min-height: 44px; }
+  .navigation-control { width: 44px; height: 44px; }
+  .topbar { height: 52px; padding-inline: 8px 12px; gap: 8px; }
+  .workspace-heading { gap: 4px; }
+}
 
 .room-view {
   display: grid;
