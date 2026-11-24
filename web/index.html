@@ -11,13 +11,18 @@
   <body>
     <a class="skip-link" href="#workspace">跳到主要内容</a>
     <div class="app-shell" id="app-shell">
-      <aside class="navigation" aria-label="房间导航">
-        <a class="brand" href="/" aria-label="同行聊天室首页"
-          ><span class="brand-mark" aria-hidden="true">同</span
-          ><span
-            >同行<span class="brand-caption">房间与对话</span></span
-          ></a
-        >
+      <aside class="navigation" id="room-navigation" aria-label="房间导航">
+        <div class="navigation-heading">
+          <button id="navigation-close" class="navigation-control" type="button" aria-label="收起侧栏" title="收起侧栏">
+            <span data-icon="panel-left"></span>
+          </button>
+          <a class="brand" href="/" aria-label="同行聊天室首页"
+            ><span class="brand-mark" aria-hidden="true">同</span
+            ><span
+              >同行<span class="brand-caption">房间与对话</span></span
+            ></a
+          >
+        </div>
         <div class="nav-section">
           <p class="eyebrow">聊天</p>
           <button id="lobby-nav" class="nav-button active" type="button">
@@ -58,16 +63,22 @@
           <span id="transport"></span>
         </div>
       </aside>
+      <button id="navigation-backdrop" class="navigation-backdrop" type="button" tabindex="-1" aria-label="关闭侧栏" hidden></button>
       <div class="workspace" id="workspace" tabindex="-1">
         <header class="topbar">
           <div id="account-brand" class="account-brand" hidden>
             <span class="account-mark" aria-hidden="true">同</span>
             <span>同行</span>
           </div>
-          <div class="breadcrumb">
-            <span data-icon="chat"></span><span>同行空间</span
-            ><span class="slash">/</span
-            ><strong id="page-label">房间大厅</strong>
+          <div class="workspace-heading">
+            <button id="navigation-toggle" class="navigation-control" type="button" aria-controls="room-navigation" aria-expanded="true" aria-label="收起侧栏" title="收起侧栏">
+              <span data-icon="panel-left"></span>
+            </button>
+            <div class="breadcrumb">
+              <span data-icon="chat"></span><span>同行空间</span
+              ><span class="slash">/</span
+              ><strong id="page-label">房间大厅</strong>
+            </div>
           </div>
           <div class="topbar-actions">
             <span id="status" class="connection" role="status">正在连接…</span>

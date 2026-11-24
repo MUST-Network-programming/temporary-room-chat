@@ -8,6 +8,7 @@ const iconPaths = {
   users:
     '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m3 10v-3a6 6 0 0 0-2-4"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/>',
+  "panel-left": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
   eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/>',
   "eye-off":
     '<path d="m3 3 18 18M10.6 6.1c.5-.1.9-.1 1.4-.1 6.5 0 10 6 10 6a16 16 0 0 1-3 3.4M6.3 7.8A16 16 0 0 0 2 12s3.5 6 10 6c1.5 0 2.8-.3 4-.8M10 10a2.8 2.8 0 0 0 4 4"/>',
@@ -128,6 +129,95 @@ document.addEventListener("pointerdown", (event) => {
 syncThemePicker();
 applyTheme();
 
+const navigationKey = "temporary-chat-navigation-collapsed";
+const navigationCompact = matchMedia("(max-width: 680px)");
+const navigation = $("room-navigation");
+const navigationToggle = $("navigation-toggle");
+let desktopNavigationCollapsed = false;
+let mobileNavigationOpen = false;
+try {
+  desktopNavigationCollapsed = localStorage.getItem(navigationKey) === "true";
+} catch (_) {}
+
+function syncNavigation() {
+  const accountScreen = $("app-shell").classList.contains("is-account");
+  if (accountScreen) mobileNavigationOpen = false;
+  const expanded = !accountScreen && (navigationCompact.matches
+    ? mobileNavigationOpen
+    : !desktopNavigationCollapsed);
+  const drawer = navigationCompact.matches && expanded;
+  const focusWasInNavigation = navigation.contains(document.activeElement);
+  navigation.hidden = !expanded;
+  navigationToggle.hidden = accountScreen;
+  navigationToggle.setAttribute("aria-expanded", String(expanded));
+  navigationToggle.setAttribute("aria-label", expanded ? "收起侧栏" : "展开侧栏");
+  navigationToggle.title = expanded ? "收起侧栏" : "展开侧栏";
+  $("app-shell").classList.toggle("is-navigation-collapsed", !expanded);
+  $("navigation-backdrop").hidden = !drawer;
+  $("workspace").inert = drawer;
+  if (drawer) {
+    navigation.setAttribute("role", "dialog");
+    navigation.setAttribute("aria-modal", "true");
+  } else {
+    navigation.removeAttribute("role");
+    navigation.removeAttribute("aria-modal");
+  }
+  if (!expanded && focusWasInNavigation && !accountScreen) navigationToggle.focus();
+  resizeDraft();
+}
+
+function closeMobileNavigation(returnFocus = true) {
+  if (!navigationCompact.matches || !mobileNavigationOpen) return;
+  mobileNavigationOpen = false;
+  syncNavigation();
+  if (returnFocus) navigationToggle.focus();
+}
+
+navigationToggle.addEventListener("click", () => {
+  if (navigationCompact.matches) {
+    mobileNavigationOpen = !mobileNavigationOpen;
+  } else {
+    desktopNavigationCollapsed = !desktopNavigationCollapsed;
+    try {
+      localStorage.setItem(navigationKey, String(desktopNavigationCollapsed));
+    } catch (_) {}
+  }
+  syncNavigation();
+  if (navigationCompact.matches && mobileNavigationOpen) {
+    closeThemeMenu();
+    $("navigation-close").focus();
+  }
+});
+$("navigation-close").addEventListener("click", () => closeMobileNavigation());
+$("navigation-backdrop").addEventListener("click", () => closeMobileNavigation());
+navigationCompact.addEventListener("change", () => {
+  mobileNavigationOpen = false;
+  syncNavigation();
+  if (!navigationCompact.matches && document.activeElement === $("navigation-close")) {
+    navigationToggle.focus();
+  }
+});
+document.addEventListener("keydown", event => {
+  if (!navigationCompact.matches || !mobileNavigationOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMobileNavigation();
+  } else if (event.key === "Tab") {
+    const focusable = [...navigation.querySelectorAll('a[href], button, input, select, [tabindex="0"]')]
+      .filter(element => !element.disabled && !element.closest("[hidden]"));
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+});
+syncNavigation();
+
 const stickers = { wave: "👋", ok: "👌", party: "🎉", heart: "💚" };
 const stickerNames = {
   wave: "打招呼",
@@ -181,6 +271,7 @@ function renderRecent() {
       if (item.room === session?.room)
         button.setAttribute("aria-current", "page");
       button.addEventListener("click", () => {
+        closeMobileNavigation(false);
         if (session) {
           notice(
             item.room === session.room
@@ -213,6 +304,7 @@ function syncWorkspace() {
   $("loading-panel").hidden = authRequired !== null;
 }
 $("lobby-nav").addEventListener("click", () => {
+  closeMobileNavigation();
   if (session) {
     notice("你正在房间中，离开后即可返回大厅。");
     return;
@@ -255,6 +347,7 @@ function showLobby() {
   const accountScreen = authRequired === true && !allowed && $("room-view").hidden;
   $("account-panel").hidden = $("account-brand").hidden = !accountScreen;
   $("app-shell").classList.toggle("is-account", accountScreen);
+  syncNavigation();
   $("lobby").hidden = !allowed || !$("room-view").hidden;
   $("nickname-field").hidden = authRequired !== false;
   $("join-description").textContent =

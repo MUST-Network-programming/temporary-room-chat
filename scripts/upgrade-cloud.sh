@@ -46,10 +46,12 @@ async def check():
         async with session.get('https://127.0.0.1/', **options) as response:
             html = await response.text()
             assert response.status == 200
-            assert 'id="older-messages"' in html and 'id="notice-send-code"' in html
+            assert all(f'id="{name}"' in html for name in
+                       ('older-messages', 'notice-send-code', 'navigation-toggle', 'room-navigation'))
         async with session.get('https://127.0.0.1/app.js', **options) as response:
             script = await response.text()
             assert response.status == 200 and '"eye-off"' in script and 'verification_pending' in script
+            assert 'temporary-chat-navigation-collapsed' in script
         async with session.get('https://127.0.0.1/api/register/policy', **options) as response:
             assert response.status == 200
             policy = await response.json()
@@ -77,7 +79,7 @@ if [[ $current == "$project" ]]; then
   exit 0
 fi
 case "$current" in
-  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd) ;;
+  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd|/home/ubuntu/temporary-room-chat-737bb3e) ;;
   *) fail "当前部署目录未识别：$current。服务未切换，请把此行反馈。" ;;
 esac
 [[ -f $config/env && -f $accounts && -f $config/nginx.conf ]] || fail '现有配置不完整，服务未切换。'
