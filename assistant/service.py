@@ -266,7 +266,7 @@ async def registration_code(request):
 
 async def static(request):
     name=request.match_info.get('file') or 'index.html'
-    if name not in ('index.html','app.js','style.css'): raise web.HTTPNotFound()
+    if name not in ('index.html','app.js','style.css','invite.js','invite.css','qrcode.js'): raise web.HTTPNotFound()
     response=web.FileResponse(ROOT/'web'/name)
     response.headers['Content-Security-Policy']="default-src 'self'; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     return response

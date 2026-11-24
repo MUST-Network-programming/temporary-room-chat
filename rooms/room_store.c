@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <sqlite3.h>
 #include <stdio.h>
+#include <string.h>
 
 static sqlite3 *store;
 
@@ -13,6 +14,7 @@ int room_store_open(const char *path) {
     const char *schema =
         "PRAGMA foreign_keys=ON;"
         "PRAGMA secure_delete=ON;"
+        "BEGIN IMMEDIATE;"
         "CREATE TABLE IF NOT EXISTS rooms("
         "instance TEXT PRIMARY KEY NOT NULL,code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,expires INTEGER NOT NULL);"
         "CREATE TABLE IF NOT EXISTS members("
@@ -25,9 +27,15 @@ int room_store_open(const char *path) {
         "CREATE TABLE IF NOT EXISTS room_notice_messages("
         "room TEXT NOT NULL REFERENCES rooms(instance) ON DELETE CASCADE, notice TEXT NOT NULL,"
         "message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, revision INTEGER NOT NULL,"
-        "PRIMARY KEY(room,notice));";
-    return sqlite3_open(path, &store) == SQLITE_OK && sqlite3_busy_timeout(store, 100) == SQLITE_OK &&
-           exec_sql(schema);
+        "PRIMARY KEY(room,notice));"
+        "CREATE TABLE IF NOT EXISTS chat_deliveries("
+        "room TEXT NOT NULL REFERENCES rooms(instance) ON DELETE CASCADE, sender TEXT NOT NULL, client_id TEXT NOT NULL,"
+        "message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, PRIMARY KEY(room,sender,client_id));"
+        "COMMIT;";
+    if (sqlite3_open(path, &store) == SQLITE_OK && sqlite3_busy_timeout(store, 100) == SQLITE_OK &&
+        exec_sql(schema)) return 1;
+    if (store) { exec_sql("ROLLBACK"); sqlite3_close(store); store = NULL; }
+    return 0;
 }
 
 void room_store_close(void) {
@@ -128,6 +136,39 @@ int room_store_append(const char *instance, cJSON *message) {
     cJSON_free(payload);
     if (ok) add_sequence(message, sqlite3_last_insert_rowid(store));
     return ok;
+}
+
+/* 消息和幂等键必须一起提交；重试读取原始服务端时间和序号。 */
+int room_store_chat(const char *instance, const char *sender, const char *client_id, cJSON **message) {
+    if (!exec_sql("BEGIN IMMEDIATE")) return 0;
+    sqlite3_stmt *stmt = prepare("SELECT m.id,m.payload FROM chat_deliveries d JOIN messages m ON m.id=d.message "
+                                "WHERE d.room=? AND d.sender=? AND d.client_id=?");
+    int result = stmt && bind_text(stmt, 1, instance) && bind_text(stmt, 2, sender) &&
+                 bind_text(stmt, 3, client_id) ? sqlite3_step(stmt) : SQLITE_ERROR;
+    cJSON *saved = result == SQLITE_ROW ? cJSON_Parse(column(stmt, 1)) : NULL;
+    if (saved) add_sequence(saved, sqlite3_column_int64(stmt, 0));
+    sqlite3_finalize(stmt);
+    if (result == SQLITE_ROW) {
+        cJSON *old_text = cJSON_GetObjectItemCaseSensitive(saved, "text");
+        cJSON *new_text = cJSON_GetObjectItemCaseSensitive(*message, "text");
+        int same = cJSON_IsString(old_text) && cJSON_IsString(new_text) &&
+                   !strcmp(old_text->valuestring, new_text->valuestring);
+        int valid = cJSON_IsObject(saved);
+        exec_sql("ROLLBACK");
+        if (!valid || !same) { cJSON_Delete(saved); return valid ? -1 : 0; }
+        cJSON_Delete(*message); *message = saved;
+        return 2;
+    }
+    if (result != SQLITE_DONE || !room_store_append(instance, *message)) goto failed_chat;
+    stmt = prepare("INSERT INTO chat_deliveries(room,sender,client_id,message) VALUES(?,?,?,?)");
+    int ok = stmt && bind_text(stmt, 1, instance) && bind_text(stmt, 2, sender) &&
+             bind_text(stmt, 3, client_id) && sqlite3_bind_int64(stmt, 4, sqlite3_last_insert_rowid(store)) == SQLITE_OK &&
+             sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    if (ok && exec_sql("COMMIT")) return 1;
+failed_chat:
+    exec_sql("ROLLBACK");
+    return 0;
 }
 
 /* 通知改期或撤销保留原来的消息位置，重启后也只显示最新版本。 */

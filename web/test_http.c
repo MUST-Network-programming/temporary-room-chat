@@ -21,6 +21,15 @@ int main(void) {
     memcpy(client.input + client.input_len, "\r\n", 2); client.input_len += 2; http_process(&client);
     assert(client.closing && strstr((char *)client.output, "200 OK") && strstr((char *)client.output, "<!doctype html>"));
     input("GET /../include/chat.h HTTP/1.1\r\n\r\n"); http_process(&client); assert(strstr((char *)client.output, "404 Not Found"));
+    const char *assets[] = {"/invite.js", "/invite.css", "/qrcode.js"};
+    for (unsigned i = 0; i < sizeof assets / sizeof assets[0]; ++i) {
+        char request[128]; snprintf(request, sizeof request, "GET %s HTTP/1.1\r\n\r\n", assets[i]);
+        input(request); http_process(&client);
+        assert(strstr((char *)client.output, "200 OK"));
+        assert(strstr((char *)client.output, i == 1 ? "text/css" : "text/javascript"));
+    }
+    input("GET /invite.js/../app.js HTTP/1.1\r\n\r\n"); http_process(&client);
+    assert(strstr((char *)client.output, "404 Not Found"));
     input("POST / HTTP/1.1\r\n\r\n"); http_process(&client); assert(strstr((char *)client.output, "405 Method Not Allowed"));
     input("GET /ws HTTP/1.1\r\nHost: localhost\r\n\r\nXYZ"); http_process(&client); assert(handshake_calls == 1 && frame_calls == 1);
     memset(&client, 0, sizeof(client)); memset(client.input, 'A', 8192); client.input_len = 8192; http_process(&client);
