@@ -489,11 +489,11 @@
             <input id="notice-email" type="email" autocomplete="email" maxlength="254" required />
           </div>
           <div class="form-actions">
-            <button class="secondary" type="submit">发送验证码</button>
+            <button id="notice-send-code" class="secondary" type="submit">发送验证码</button>
             <button id="notice-unbind" class="secondary" type="button" hidden>解绑邮箱</button>
           </div>
         </form>
-        <form id="notice-code-form" class="notice-form">
+        <form id="notice-code-form" class="notice-form" hidden>
           <div class="field">
             <label for="notice-code">六位验证码</label>
             <input id="notice-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required />

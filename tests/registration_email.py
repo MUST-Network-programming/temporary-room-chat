@@ -224,7 +224,8 @@ def main():
         assert len(inbox_messages(capture_inbox)) == 1
         assert notice_contact('contact')[0] == 401
         assert notice_contact('contact', token) == (
-            200, {'email': None, 'registration_email': 'owner@example.test', 'local_only': True})
+            200, {'email': None, 'registration_email': 'owner@example.test', 'local_only': True,
+                  'retry_after': 0, 'verification_pending': False})
         assert notice_contact('use-registration-email', token, {}) == (200, {'ok': True})
         assert notice_contact('contact', token)[1]['email'] == 'owner@example.test'
         assert notice_contact('use-registration-email', token, {}) == (200, {'ok': True})

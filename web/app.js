@@ -1256,7 +1256,26 @@ $("bot-mention-option").addEventListener("click", insertBotMention);
 
 const noticeDialog = $("notice-dialog");
 const noticeCards = new Map();
+const noticeSendCode = $("notice-send-code");
 let noticeView = "", noticeBusy = false, noticeRequestId = "";
+let noticeCodeReadyAt = 0;
+let noticeCodeTimer;
+
+function renderNoticeCodeButton() {
+  clearTimeout(noticeCodeTimer);
+  const seconds = Math.max(0, Math.ceil((noticeCodeReadyAt - Date.now()) / 1000));
+  noticeSendCode.textContent = seconds ? `${seconds} 秒后重发` : "发送验证码";
+  noticeSendCode.disabled = noticeBusy || seconds > 0;
+  if (seconds && noticeDialog.open && noticeView === "contact") {
+    noticeCodeTimer = setTimeout(renderNoticeCodeButton, 1000);
+  }
+}
+
+function setNoticeCodeCooldown(seconds) {
+  if (!Number.isInteger(seconds) || seconds < 0) return;
+  noticeCodeReadyAt = Date.now() + seconds * 1000;
+  renderNoticeCodeButton();
+}
 
 function displayNoticeCard(data, page) {
   let card = noticeCards.get(data.id);
@@ -1296,7 +1315,12 @@ async function noticeAPI(action, payload, room = false) {
   });
   if (token !== loginToken) throw new Error("账号已切换");
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "通知服务暂不可用");
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || "通知服务暂不可用"), {
+      status: response.status,
+      retryAfter: data.retry_after,
+    });
+  }
   return data;
 }
 
@@ -1308,6 +1332,7 @@ function noticeStatus(text = "") {
 async function runNotice(action) {
   if (noticeBusy) return;
   noticeBusy = true;
+  renderNoticeCodeButton();
   noticeStatus();
   noticeDialog.setAttribute("aria-busy", "true");
   try {
@@ -1316,6 +1341,7 @@ async function runNotice(action) {
     if (noticeDialog.open) noticeStatus(error.message);
   } finally {
     noticeBusy = false;
+    renderNoticeCodeButton();
     noticeDialog.removeAttribute("aria-busy");
   }
 }
@@ -1340,9 +1366,11 @@ async function refreshCoverage() {
 
 async function refreshContact() {
   const contact = await noticeAPI("contact");
+  setNoticeCodeCooldown(contact.retry_after);
   $("notice-contact-current").textContent = contact.email ? "已绑定 " + contact.email : "尚未绑定通知邮箱";
   $("notice-contact-local").hidden = !contact.local_only;
   $("notice-unbind").hidden = !contact.email;
+  $("notice-code-form").hidden = Boolean(contact.email) && !contact.verification_pending;
   const eligibleEmail = contact.email ? "" : (contact.registration_email || "");
   $("notice-registration-address").textContent = eligibleEmail;
   $("notice-registration-contact").hidden = !eligibleEmail;
@@ -1449,6 +1477,7 @@ function openNotice(view) {
     $("notice-contact-current").textContent = "正在读取绑定状态…";
     $("notice-registration-address").textContent = "";
     $("notice-registration-contact").hidden = true;
+    $("notice-code-form").hidden = true;
     $("notice-code").value = "";
     runNotice(refreshContact);
   } else {
@@ -1463,6 +1492,7 @@ function resetNoticeDraft() {
 }
 
 $("notice-dialog-close").addEventListener("click", () => noticeDialog.close());
+noticeDialog.addEventListener("close", renderNoticeCodeButton);
 $("notice-publish-open").addEventListener("click", () => openNotice("publish"));
 $("notice-room-contact").addEventListener("click", () => openNotice("contact"));
 $("notice-contact-open").addEventListener("click", () => openNotice("contact"));
@@ -1486,17 +1516,31 @@ $("notice-compose").addEventListener("submit", (event) => {
 });
 $("notice-email-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (noticeSendCode.disabled) return;
   runNotice(async () => {
-    await noticeAPI("send-code", { email: $("notice-email").value.trim() });
+    try {
+      const result = await noticeAPI("send-code", { email: $("notice-email").value.trim() });
+      setNoticeCodeCooldown(result.retry_after);
+    } catch (error) {
+      setNoticeCodeCooldown(error.retryAfter);
+      if (error.status === 429 && error.retryAfter > 0) {
+        await refreshContact();
+        return;
+      }
+      throw error;
+    }
     noticeStatus("验证码已发送，请查看收件箱。");
+    $("notice-code-form").hidden = false;
     $("notice-code").focus();
   });
 });
 $("notice-code-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if ($("notice-code-form").hidden) return;
   runNotice(async () => {
     await noticeAPI("verify", { code: $("notice-code").value.trim() });
     $("notice-code-form").reset();
+    $("notice-code-form").hidden = true;
     await refreshContact();
     noticeStatus("邮箱已验证并绑定。");
   });
@@ -1505,6 +1549,7 @@ $("notice-use-registration-email").addEventListener("click", () => {
   if ($("notice-registration-contact").hidden) return;
   runNotice(async () => {
     await noticeAPI("use-registration-email", {});
+    $("notice-code-form").hidden = true;
     await refreshContact();
     noticeStatus("已绑定注册邮箱。");
   });
