@@ -445,3 +445,38 @@
 .message-retry{min-height:28px;padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--ink);font-size:11px}
 .chat-message[data-delivery=failed] .message-text{outline:1px dashed var(--muted);outline-offset:2px}
 .chat-message[data-delivery=sending] .message-text{opacity:.75}
+
+/* 新增协作功能样式（沿用现有主题变量，不改动既有界面风格） */
+.expiry-banner{display:flex;align-items:center;gap:8px;padding:7px 18px;border-bottom:1px solid var(--border);background:var(--soft);font-size:12px;flex-shrink:0}
+.expiry-banner #expiry-banner-text{flex:1;min-width:0;font-variant-numeric:tabular-nums}
+.expiry-banner button{min-height:28px;padding:4px 10px;font-size:12px}
+.sidebar-tools{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.sidebar-tools button{width:100%;font-size:12px}
+#notify-toggle[aria-pressed="true"]{border-color:var(--strong)}
+.member-tags{margin-left:auto;display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
+.member-owner-badge{padding:1px 6px;border:1px solid var(--border);border-radius:999px;background:var(--soft);font-size:10px;color:var(--ink)}
+.member-transfer-btn{min-height:24px;padding:2px 8px;font-size:11px}
+.export-ics-btn{width:100%;margin-top:12px;font-size:12px}
+.message-bubble-wrap{display:flex;align-items:center;gap:4px;max-width:100%}
+.own .message-bubble-wrap{flex-direction:row-reverse}
+.reply-trigger{min-height:26px;width:26px;padding:0;border:0;background:transparent;color:var(--muted);opacity:0;flex-shrink:0}
+.chat-message:hover .reply-trigger,.chat-message:focus-within .reply-trigger,.reply-trigger:focus-visible{opacity:1}
+.reply-trigger:hover:not(:disabled){background:var(--soft);color:var(--ink);opacity:1}
+.reply-trigger svg{width:14px;height:14px}
+@media(hover:none){.reply-trigger{opacity:.65}}
+.message-quote{display:flex;flex-direction:column;gap:2px;margin-bottom:5px;padding:4px 8px;border-left:2px solid var(--muted);border-radius:4px;background:var(--soft);font-size:11px;line-height:1.4;max-width:100%}
+.message-quote strong{font-weight:600;color:var(--ink)}
+.message-quote span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-message.is-mentioned .message-text{border:1px solid var(--ring)}
+.reply-preview{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 10px;border:1px solid var(--border);border-left:3px solid var(--strong);border-radius:6px;background:var(--soft)}
+.reply-preview-body{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12px}
+.reply-preview-body span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reply-preview button{min-height:26px;padding:2px 7px;border:0;background:transparent}
+#bot-mention-picker{display:flex;flex-direction:column;gap:2px;min-width:180px;max-height:200px;overflow-y:auto}
+.mention-btn{width:100%;justify-content:space-between;min-height:30px;padding:4px 10px;font-size:12px;border:0;background:transparent}
+.mention-btn:hover:not(:disabled),.mention-btn.active{background:var(--soft);opacity:1}
+.mention-role{font-size:11px;color:var(--muted);font-weight:400}
+#leave-dialog{width:min(420px,calc(100% - 24px));max-height:85dvh;padding:20px;overflow:auto;border:1px solid var(--border);border-radius:14px;color:var(--ink);background:var(--panel)}
+#leave-dialog::backdrop{background:#0008}
+.leave-dialog-actions{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.leave-dialog-actions button{width:100%}

@@ -256,12 +256,23 @@
                 <p class="field-hint">邀请只包含房间码；对方需自行登录并确认加入。</p>
                 <p id="invite-copy-status" class="field-hint" role="status"></p>
               </div>
-              <button id="notice-room-contact" class="secondary" type="button" hidden>绑定通知邮箱</button>
+              <div class="sidebar-tools">
+                <button id="notify-toggle" class="secondary" type="button" aria-pressed="false">
+                  <span id="notify-toggle-label">桌面通知：关</span>
+                </button>
+                <button id="export-chat" class="secondary" type="button">
+                  <span data-icon="download"></span>导出聊天记录 (.md)
+                </button>
+                <button id="notice-room-contact" class="secondary" type="button" hidden>绑定通知邮箱</button>
+              </div>
               <details id="room-settings" class="room-settings">
                 <summary>房间设置</summary>
                 <div class="room-settings-body">
                   <p id="expiry" class="muted"></p>
                   <div class="room-actions">
+                    <button id="extend-room" class="secondary" type="button" hidden>
+                      延长有效期 (+2小时)
+                    </button>
                     <button id="rename" class="secondary" type="button" hidden>
                       更改群名
                     </button>
@@ -300,6 +311,9 @@
                   <div id="confirm-tools" hidden><label class="check-row"><input id="demo-reminder" type="checkbox"> 同时添加一分钟后本地测试提醒</label>
                   <div class="form-actions"><button id="save-itinerary" type="button" class="secondary">保存草稿</button><button id="confirm-itinerary" type="submit">确认并发布</button></div></div>
                 </form>
+                <button id="export-itinerary-ics" class="secondary export-ics-btn" type="button" hidden>
+                  <span data-icon="download"></span>导出到系统日历 (.ics)
+                </button>
               </div>
               <div class="panel-section"><h3>我的邮件订阅</h3><p class="field-hint">前一晚20:00 / 集合前30分钟。已过时间不补发；新版确认后取消旧提醒。</p>
                 <form id="subscription-form"><label for="subscriber-email">订阅邮箱</label><input id="subscriber-email" type="email" placeholder="traveler@example.test" autocomplete="off" required><div class="form-actions"><button type="submit" class="secondary">订阅提醒</button><button id="unsubscribe" type="button" class="secondary">取消订阅</button></div></form>
@@ -308,6 +322,11 @@
               <div class="panel-section"><h3>发送记录与排期</h3><ul id="itinerary-jobs" class="job-list"></ul><ul id="itinerary-logs" class="job-list"></ul></div>
             </aside>
             <div class="conversation">
+              <div id="expiry-banner" class="expiry-banner" role="status" hidden>
+                <span data-icon="clock"></span>
+                <span id="expiry-banner-text"></span>
+                <button id="expiry-banner-extend" class="secondary" type="button" hidden>延长 2 小时</button>
+              </div>
               <button id="pinned-itinerary" class="pinned-itinerary secondary" type="button" hidden></button>
               <div class="message-area">
                 <div id="conversation-intro" class="conversation-intro">
@@ -332,6 +351,13 @@
               <p id="room-notice" class="room-notice" role="status" hidden></p>
             </div>
             <form id="message-form" class="composer">
+              <div id="reply-preview" class="reply-preview" hidden>
+                <div class="reply-preview-body">
+                  <strong id="reply-preview-name"></strong>
+                  <span id="reply-preview-text"></span>
+                </div>
+                <button id="reply-cancel" class="secondary" type="button" aria-label="取消引用回复">✕</button>
+              </div>
               <div class="composer-row">
                 <button
                   id="expression-toggle"
@@ -540,6 +566,24 @@
         <button id="notice-refresh" class="secondary" type="button">刷新进度</button>
         <div id="notice-list" class="notice-list"></div>
       </section>
+    </dialog>
+    <dialog id="leave-dialog" aria-labelledby="leave-dialog-title">
+      <div class="panel-heading">
+        <h2 id="leave-dialog-title">离开房间</h2>
+        <button id="leave-dialog-close" class="secondary" type="button" aria-label="关闭">✕</button>
+      </div>
+      <p class="field-hint">你是当前房主。可以选择暂时离开（保留房主身份且不影响大家继续聊天，随时可从「最近房间」返回），或转让房主 / 关闭房间。</p>
+      <div id="leave-transfer-group" class="field">
+        <label for="transfer-select">如需转让，选择接任房主</label>
+        <select id="transfer-select"></select>
+      </div>
+      <p id="leave-dialog-scheduled" class="field-hint" hidden></p>
+      <div class="leave-dialog-actions">
+        <button id="leave-detach-confirm" type="button">暂时离开（保留房主，不关闭房间）</button>
+        <button id="leave-transfer-confirm" class="secondary" type="button">转让房主并退出</button>
+        <button id="leave-close-confirm" class="danger" type="button">解散并关闭房间</button>
+        <button id="leave-cancel" class="secondary" type="button">取消</button>
+      </div>
     </dialog>
   </body>
 </html>

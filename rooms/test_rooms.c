@@ -75,7 +75,21 @@ int main(void) {
     assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(last[1], "sent_at")));
     cJSON_Delete(confirmed);
     room_disconnect(&clients[5]); join(4,code,"房主",token);
-    msg(4,"{\"type\":\"leave\"}"); assert(clients[1].member==-1); join(1,code,"成员",NULL); err(1,"room_not_found");
+    /* Quoted reply, TTL extend, ownership transfer, owner detach+resume, and transfer-leave */
+    msg(1,"{\"type\":\"chat\",\"text\":\"收到回复\",\"reply_to\":\"房主\",\"reply_text\":\"你好\",\"client_id\":\"fedcba9876543210fedcba9876543210\"}");
+    assert(!strcmp(field(last[4],"reply_to"),"房主") && !strcmp(field(last[4],"reply_text"),"你好"));
+    msg(1,"{\"type\":\"extend\"}"); err(1,"forbidden");
+    msg(4,"{\"type\":\"extend\"}"); assert(!strcmp(field(last[1],"type"),"extended"));
+    msg(1,"{\"type\":\"transfer\",\"target\":\"房主\"}"); err(1,"forbidden");
+    msg(4,"{\"type\":\"transfer\",\"target\":\"成员\"}"); assert(clients[1].member>=0 && clients[4].member>=0);
+    msg(4,"{\"type\":\"rename\",\"name\":\"已不是房主\"}"); err(4,"forbidden");
+    msg(1,"{\"type\":\"transfer\",\"target\":\"房主\"}");
+    msg(4,"{\"type\":\"detach\"}"); assert(clients[4].member==-1 && clients[1].member>=0);
+    msg(1,"{\"type\":\"chat\",\"text\":\"房主暂离时仍可聊天\"}");
+    join(4,code,"房主",token); assert(clients[4].member>=0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(welcome[4],"owner")));
+    msg(4,"{\"type\":\"leave\",\"transfer\":\"成员\"}"); assert(clients[4].member==-1 && clients[1].member>=0);
+    msg(1,"{\"type\":\"rename\",\"name\":\"新房主改名\"}"); assert(!strcmp(field(last[1],"type"),"renamed"));
+    msg(1,"{\"type\":\"leave\"}"); assert(clients[1].member==-1); join(1,code,"成员",NULL); err(1,"room_not_found");
     room_tick(time(NULL)+3601); assert(clients[2].member==-1);
     for(int i=0;i<16;++i) { msg(i,"{\"type\":\"create\",\"nickname\":\"a\"}"); assert(clients[i].member>=0); }
     msg(16,"{\"type\":\"create\",\"nickname\":\"b\"}"); err(16,"capacity");
