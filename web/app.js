@@ -341,8 +341,11 @@ let account = null,
   authPending = false,
   assistantEnabled = false;
 let resumingLogin = false,
-  registering = false,
-  emailRegistration = false;
+  migratingAccount = false,
+  requestingCode = false,
+  loginChallenge = null;
+const loginCooldowns = new Map();
+let loginCountdown;
 try {
   loginToken = sessionStorage.getItem(loginKey);
 } catch (_) {}
@@ -472,11 +475,12 @@ function controls() {
   const allowed = authRequired === false || Boolean(account);
   $("account-submit").disabled = !online || authPending;
   $("account-fields").disabled = $("account-toggle").disabled = authPending;
+  updateCodeButton();
   $("account-form").setAttribute("aria-busy", String(authPending));
   $("account-spinner").hidden = !authPending;
   $("account-submit-text").textContent = authPending
-    ? (resumingLogin ? "正在恢复登录" : registering ? "正在注册…" : "正在登录…")
-    : (registering ? "注册并登录" : "登录");
+    ? (resumingLogin ? "正在恢复登录" : "正在登录…")
+    : (migratingAccount ? "绑定邮箱并登录" : "登录");
   $("create").disabled = $("join").disabled = !online || !allowed || pending;
   $("send").disabled = !online || !joined || !$("message").value.trim();
   $("rename").disabled = !online || !joined;
@@ -1101,7 +1105,6 @@ function onMessage(event) {
         send({ type: "authenticate", token: loginToken });
       } else if (!authRequired) restoreRoom();
       if (!joined) showLobby();
-      loadRegistrationPolicy();
       controls();
       break;
     case "authenticated":
@@ -1109,6 +1112,7 @@ function onMessage(event) {
       account = data.name;
       authPending = resumingLogin = false;
       $("account-form").reset();
+      loginChallenge = null;
       setAccountMode(false);
       saveLogin(data.token);
       if (shouldRestore) restoreRoom();
@@ -1260,16 +1264,7 @@ function onMessage(event) {
       } else if (authPending) {
         authPending = resumingLogin = false;
         controls();
-        if (data.code === "login_invalid") {
-          accountError("用户名或密码有误，请检查后重试。");
-          $("account-password").focus();
-        } else if (data.code === "invite_invalid") {
-          accountError("注册码无效或已使用，请核对或重新领取。", "invite-code");
-        } else if (data.code === "name_taken") {
-          accountError("该用户名已被使用，请换一个。", "account-name");
-        } else {
-          accountError(data.message);
-        }
+        accountError(data.message, data.code === "code_invalid" ? "login-code" : undefined);
       } else if (data.code === "session_replaced")
         resetRoom("此会话已在另一连接恢复，请重新加入。");
       else if (restoring)
@@ -1380,89 +1375,102 @@ function revealPassword(revealed) {
   button.querySelector('[data-icon="eye-off"]').hidden = !revealed;
   button.setAttribute("aria-label", revealed ? "隐藏密码" : "显示密码");
 }
-function applyRegistrationPolicy() {
-  $("email-register").hidden = !registering || !emailRegistration;
-  $("account-description").textContent = !registering
-    ? "使用同行账号创建或加入临时房间。"
-    : emailRegistration
-      ? "使用邮箱领取注册码，或直接填写组织者提供的注册码。"
-      : "使用组织者提供的一次性注册码。";
+function loginEmail() {
+  return $("account-email").value.trim().toLowerCase();
 }
-async function loadRegistrationPolicy() {
-  const policySocket = socket;
-  let enabled = false;
-  if (authRequired) {
-    try {
-      const response = await fetch("/api/register/policy");
-      if (response.ok) {
-        const policy = await response.json();
-        enabled = policy.email_registration === true;
-      }
-    } catch (_) {
-      // 未启用邮箱注册服务时，仍可使用组织者发放的注册码。
-    }
+function updateCodeButton() {
+  clearTimeout(loginCountdown);
+  const now = Date.now();
+  for (const [email, deadline] of loginCooldowns) {
+    if (deadline <= now) loginCooldowns.delete(email);
   }
-  if (socket !== policySocket) return;
-  emailRegistration = enabled;
-  applyRegistrationPolicy();
+  const remaining = Math.ceil(((loginCooldowns.get(loginEmail()) || now) - now) / 1000);
+  const button = $("send-login-code");
+  button.disabled = requestingCode || authPending || remaining > 0;
+  button.textContent = requestingCode ? "发送中…" : remaining > 0 ? `${remaining} 秒后重发` : "发送验证码";
+  if (remaining > 0) loginCountdown = setTimeout(updateCodeButton, 1000);
 }
-$("send-register-code").addEventListener("click", async () => {
-  const button = $("send-register-code");
-  if (!registering || !emailRegistration || button.disabled) return;
-  const field = $("register-email");
-  const email = field.value.trim();
-  if (!email || field.validity.typeMismatch) {
-    accountError("请输入有效的邮箱地址。", "register-email");
+function validatedEmail() {
+  const email = loginEmail();
+  if (!email || $("account-email").validity.typeMismatch) {
+    accountError("请输入有效的邮箱地址。", "account-email");
+    return "";
+  }
+  return email;
+}
+$("send-login-code").addEventListener("click", async () => {
+  if ($("send-login-code").disabled) return;
+  if (location.protocol !== "https:") {
+    notice("请通过 HTTPS 登录。");
     return;
   }
+  const email = validatedEmail();
+  if (!email) return;
 
   clearAccountError();
   notice();
-  button.disabled = true;
+  requestingCode = true;
+  updateCodeButton();
   let feedback;
   try {
-    const response = await fetch("/api/register/code", {
+    const response = await fetch("/api/login/code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
     const data = await response.json().catch(() => ({}));
-    feedback = response.ok
-      ? "如果该邮箱可以注册，验证码会发到邮箱。"
-      : data.error || "注册码未能发出。";
+    if (Number.isFinite(data.retry_after) && data.retry_after > 0) {
+      loginCooldowns.set(email, Date.now() + data.retry_after * 1000);
+    }
+    if (response.ok && /^[a-f0-9]{64}$/.test(data.challenge)) {
+      if (loginEmail() === email) {
+        loginChallenge = { email, key: data.challenge };
+        $("login-code").value = "";
+        $("login-code").focus();
+      }
+      feedback = "验证码已发送，请查看邮箱。";
+    } else {
+      feedback = data.error || "验证码未能发送，请稍后重试。";
+    }
   } catch (_) {
-    feedback = "注册码未能发出。";
+    feedback = "验证码未能发送，请稍后重试。";
   } finally {
-    button.disabled = false;
+    requestingCode = false;
+    updateCodeButton();
   }
-  if (registering && emailRegistration && !authPending &&
-      $("account-notice").hidden && field.value.trim() === email) {
-    notice(feedback);
-  }
+  if (loginEmail() === email && !account && !authPending) notice(feedback);
 });
-function setAccountMode(signup) {
-  registering = signup;
-  $("account-title").textContent = signup ? "注册账号" : "登录";
-  applyRegistrationPolicy();
-  $("account-switch-label").textContent = signup ? "已有账号？" : "没有账号？";
-  $("account-toggle").textContent = signup ? "返回登录" : "使用注册码注册";
-  $("invite-field").hidden = !signup;
-  $("invite-code").required = signup;
-  $("account-password").autocomplete = signup ? "new-password" : "current-password";
+function setAccountMode(migrate) {
+  migratingAccount = migrate;
+  $("account-title").textContent = migrate ? "迁移旧账号" : "登录";
+  $("account-description").textContent = migrate
+    ? "验证旧账号和邮箱，继续使用原来的账号和房间身份。"
+    : "使用邮箱验证码登录，首次验证会创建账号。";
+  const toggle = $("account-toggle");
+  toggle.textContent = migrate ? "返回邮箱登录" : "迁移未绑定邮箱的旧账号";
+  toggle.setAttribute("aria-expanded", String(migrate));
+  $("legacy-account-fields").hidden = !migrate;
   $("account-password").value = "";
   clearAccountError();
   revealPassword(false);
   controls();
 }
 $("account-toggle").addEventListener("click", () => {
-  setAccountMode(!registering);
+  setAccountMode(!migratingAccount);
   notice();
-  $("account-name").focus();
+  $("account-email").focus();
 });
 $("account-show-password").addEventListener("click", () => {
   revealPassword($("account-password").type === "password");
 });
-$("account-form").addEventListener("input", () => {
+$("account-form").addEventListener("input", (event) => {
+  if (event.target.id === "account-email") {
+    if (loginChallenge && loginChallenge.email !== loginEmail()) {
+      loginChallenge = null;
+      $("login-code").value = "";
+    }
+    updateCodeButton();
+  }
   clearAccountError();
   if (!$("account-notice").hidden) notice();
 });
@@ -1473,34 +1481,31 @@ $("account-form").addEventListener("submit", (event) => {
     notice("请通过 HTTPS 登录。");
     return;
   }
-  const name = $("account-name").value.trim();
-  if (!/^[a-z0-9_]{3,24}$/.test(name)) {
-    accountError("用户名需要 3–24 位小写字母、数字或下划线。", "account-name");
+  const email = validatedEmail();
+  if (!email) return;
+  if (loginChallenge?.email !== email) {
+    accountError("请先发送验证码。", "account-email");
     return;
   }
-  const password = $("account-password").value;
-  const passwordBytes = bytes(password);
-  if (passwordBytes < 8 || passwordBytes > 128) {
-    accountError("密码需要 8–128 个字节。", "account-password");
+  const code = $("login-code").value.trim();
+  if (!/^[0-9]{6}$/.test(code)) {
+    accountError("请输入六位数字验证码。", "login-code");
     return;
   }
-  const request = { type: registering ? "register" : "login", name, password };
-  if (registering) {
-    const code = $("invite-code").value.trim();
-    if (!/^[a-f0-9]{32}$/i.test(code)) {
-      accountError("请输入完整的 32 位注册码。", "invite-code");
+  const request = { type: "email_login", challenge: loginChallenge.key, code };
+  if (migratingAccount) {
+    const name = $("account-name").value.trim();
+    const password = $("account-password").value;
+    if (!/^[a-z0-9_]{3,24}$/.test(name)) {
+      accountError("请输入旧账号的用户名。", "account-name");
       return;
     }
-    request.invite = code.toLowerCase();
-    const emailField = $("register-email");
-    const email = emailField.value.trim();
-    if (emailRegistration && email) {
-      if (emailField.validity.typeMismatch) {
-        accountError("请输入有效的邮箱地址。", "register-email");
-        return;
-      }
-      request.email = email;
+    if (bytes(password) < 8 || bytes(password) > 128) {
+      accountError("请输入旧账号的密码。", "account-password");
+      return;
     }
+    request.legacy_name = name;
+    request.legacy_password = password;
   }
   clearAccountError();
   notice();
@@ -2464,7 +2469,7 @@ $("notice-use-registration-email").addEventListener("click", () => {
     await noticeAPI("use-registration-email", {});
     $("notice-code-form").hidden = true;
     await refreshContact();
-    noticeStatus("已绑定注册邮箱。");
+    noticeStatus("已绑定登录邮箱。");
   });
 });
 $("notice-unbind").addEventListener("click", () => {

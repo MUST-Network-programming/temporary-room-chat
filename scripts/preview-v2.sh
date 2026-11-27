@@ -31,7 +31,6 @@ elif [[ $# -ne 0 ]]; then
 fi
 export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://43.129.182.26}"
 export AI_MODE=rules ALLOW_EXTERNAL_EMAIL=0 SMTP_HOST=127.0.0.1 SMTP_PORT=1025
-export REGISTRATION_EMAIL=0
 unset SMTP_USERNAME SMTP_PASSWORD SMTP_SSL
 cmake -S . -B build >/dev/null
 cmake --build build -j2 >/dev/null

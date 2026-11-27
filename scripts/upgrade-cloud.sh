@@ -31,11 +31,9 @@ verify_release() {
   for unit in "${units[@]}"; do
     [[ $(systemctl show "$unit" -p WorkingDirectory --value) == "$project" ]] || return 1
   done
-  runuser -u ubuntu -- "$project/.venv/bin/python" - "${expected_policy:-}" <<'PY'
+  runuser -u ubuntu -- "$project/.venv/bin/python" - <<'PY'
 import asyncio
-import json
 import ssl
-import sys
 from aiohttp import ClientSession, ClientTimeout
 
 async def check():
@@ -47,7 +45,7 @@ async def check():
             html = await response.text()
             assert response.status == 200
             assert all(f'id="{name}"' in html for name in
-                       ('older-messages', 'notice-send-code', 'navigation-toggle', 'room-navigation'))
+                       ('older-messages', 'notice-send-code', 'navigation-toggle', 'room-navigation', 'send-login-code'))
         async with session.get('https://127.0.0.1/app.js', **options) as response:
             script = await response.text()
             assert response.status == 200 and '"eye-off"' in script and 'verification_pending' in script
@@ -56,34 +54,31 @@ async def check():
         for asset in ('invite.js', 'invite.css', 'qrcode.js'):
             async with session.get('https://127.0.0.1/' + asset, **options) as response:
                 assert response.status == 200 and len(await response.read()) > 100
-        async with session.get('https://127.0.0.1/api/register/policy', **options) as response:
+        async with session.get('https://127.0.0.1/api/login/policy', **options) as response:
             assert response.status == 200
             policy = await response.json()
-            assert isinstance(policy['email_registration'], bool)
-            if sys.argv[1]:
-                assert policy == json.loads(sys.argv[1]), '邮件开关或注册策略与升级前不同'
+            assert policy['email_login'] is True, '邮箱登录数据库未就绪'
+            assert policy['local_only'] is False, '当前域名仍处于本地邮件模式'
         async with session.get('https://127.0.0.1/api/notices/contact', **options) as response:
             assert response.status == 401
         async with session.ws_connect('wss://127.0.0.1/ws', **options) as ws:
             await ws.send_json({'type': 'auth_mode'})
             mode = await ws.receive_json()
             assert mode['type'] == 'auth_mode' and mode['required'] is True
-    print('新版页面、HTTPS、WSS、注册策略和通知接口验证通过。')
+    print('新版页面、HTTPS、WSS、邮箱登录和通知接口验证通过。')
 
 asyncio.run(check())
 PY
 }
 
 current=$(systemctl show "$backend" -p WorkingDirectory --value)
-expected_policy=$(curl --noproxy '*' -fsS --max-time 8 \
-  --connect-to '43.129.182.26:443:127.0.0.1:443' 'https://43.129.182.26/api/register/policy')
 if [[ $current == "$project" ]]; then
   verify_release || fail '新版已配置，但验证失败，请检查服务日志。'
   printf '版本 %s 已在运行。\n' "$revision"
   exit 0
 fi
 case "$current" in
-  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd|/home/ubuntu/temporary-room-chat-737bb3e|/home/ubuntu/temporary-room-chat-41238cc) ;;
+  /home/ubuntu/temporary-room-chat-v2|/home/ubuntu/temporary-room-chat-1b8a2b7|/home/ubuntu/temporary-room-chat-7977350|/home/ubuntu/temporary-room-chat-fb410cd|/home/ubuntu/temporary-room-chat-737bb3e|/home/ubuntu/temporary-room-chat-41238cc|/home/ubuntu/temporary-room-chat-d2e834d) ;;
   *) fail "当前部署目录未识别：$current。服务未切换，请把此行反馈。" ;;
 esac
 [[ -f $config/env && -f $accounts && -f $config/nginx.conf ]] || fail '现有配置不完整，服务未切换。'
@@ -93,14 +88,20 @@ for unit in "${units[@]}"; do
      $(systemctl show "$unit" -p WorkingDirectory --value) == "$current" ]] ||
     fail "服务使用了不同的目录或额外配置：$unit。服务未切换。"
   dropins=$(systemctl show "$unit" -p DropInPaths --value)
-  if [[ -n $dropins ]]; then
-    expected="/etc/systemd/system/$unit.d/95-gmail-outbound.conf"
-    [[ $unit == temporary-room-chat-v2-api.service || $unit == temporary-room-chat-v2-worker.service ]] &&
-      [[ $dropins == "$expected" ]] || fail "存在未识别的服务覆盖配置：$unit"
-    diff -q "$expected" <(printf '[Service]\nEnvironmentFile=/etc/temporary-room-chat-v2/gmail-outbound.env\n') >/dev/null ||
-      fail "邮件服务覆盖配置内容不匹配：$unit"
-    [[ -r $config/gmail-outbound.env ]] || fail 'Gmail 配置文件不存在。'
-  fi
+  read -r -a overrides <<< "$dropins"
+  for override in "${overrides[@]}"; do
+    case "$unit:$override" in
+      temporary-room-chat-v2-api.service:"$unit_dir/$unit.d/96-deepseek.conf")
+        env_path="$config/deepseek.env" ;;
+      temporary-room-chat-v2-api.service:"$unit_dir/$unit.d/95-gmail-outbound.conf"|temporary-room-chat-v2-worker.service:"$unit_dir/$unit.d/95-gmail-outbound.conf")
+        env_path="$config/gmail-outbound.env" ;;
+      *) fail "存在未识别的服务覆盖配置：$unit" ;;
+    esac
+    diff -q <(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$override") \
+      <(printf '[Service]\nEnvironmentFile=%s\n' "$env_path") >/dev/null ||
+      fail "服务覆盖配置内容不匹配：$unit"
+    [[ -r $env_path ]] || fail "环境配置不存在：$env_path"
+  done
   grep -Fxq "WorkingDirectory=$current" "$file" &&
     grep -Fq "ExecStart=$current/" "$file" || fail "无法识别服务配置：$unit"
 done
@@ -151,7 +152,7 @@ on_exit() {
        systemctl is-active --quiet "${services[@]}" &&
        [[ $(systemctl show "$backend" -p WorkingDirectory --value) == "$current" ]] &&
        curl --noproxy '*' -fsS --retry 3 --retry-connrefused --max-time 8 \
-         --connect-to '43.129.182.26:443:127.0.0.1:443' 'https://43.129.182.26/api/register/policy' >/dev/null; then
+         --connect-to '43.129.182.26:443:127.0.0.1:443' 'https://43.129.182.26/' >/dev/null; then
       printf '已恢复旧版服务。数据库快照和配置备份：%s。\n' "$backup" >&2
     else
       printf '自动恢复未完成，请检查服务日志。备份：%s。\n' "$backup" >&2

@@ -20,10 +20,10 @@ from aiohttp import web
 
 if __package__:
     from .backend import SECRET, ChatError, chat_rpc, deliver, local_mail_only
-    from .registration import verified_email
+    from .email_auth import verified_email
 else:
     from backend import SECRET, ChatError, chat_rpc, deliver, local_mail_only
-    from registration import verified_email
+    from email_auth import verified_email
 
 TZ = ZoneInfo('Asia/Shanghai')
 STATE = Path(os.environ.get('ASSISTANT_STATE', str(Path(__file__).resolve().parents[1] / '.local-v2')))
@@ -170,7 +170,7 @@ def contact(account):
 def use_registration_email(account):
     email = verified_email(account)
     if not email:
-        raise ValueError('当前没有可用于接收通知的注册邮箱')
+        raise ValueError('当前没有可用于接收通知的登录邮箱')
     with database() as conn:
         conn.execute('INSERT INTO contacts(account,email) VALUES(?,?) ON CONFLICT(account) DO NOTHING',
                      (account, email))

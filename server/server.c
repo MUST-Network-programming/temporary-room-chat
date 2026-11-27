@@ -85,13 +85,12 @@ int main(int argc, char **argv) {
     unsigned port=8080; const char *bind_address="127.0.0.1", *cert=NULL,*key=NULL;
     const char *account_path = "accounts.sqlite3";
     const char *rooms_path = getenv("CHAT_ROOMS_DB");
-    int anonymous = 0, invite = 0;
+    int anonymous = 0;
 #ifndef _WIN32
     umask(0077);
 #endif
     for (int i=1;i<argc;i++) {
         if (!strcmp(argv[i], "--anonymous-loopback")) { anonymous = 1; continue; }
-        if (!strcmp(argv[i], "--issue-invite")) { invite = 1; continue; }
         if (!strcmp(argv[i], "--log-chat")) { log_chat = 1; continue; }
         if (i+1>=argc) goto usage;
         const char *option=argv[i], *value=argv[++i];
@@ -103,12 +102,6 @@ int main(int argc, char **argv) {
         else if (!strcmp(option,"--accounts")) account_path=value;
         else if (!strcmp(option,"--rooms-db")) rooms_path=value;
         else goto usage;
-    }
-    if (invite) {
-        if (anonymous || !accounts_open(account_path)) return 1;
-        int success = accounts_invite();
-        accounts_close();
-        return success ? 0 : 1;
     }
     if (!!cert != !!key || (!anonymous && !cert) ||
         (anonymous && strcmp(bind_address, "127.0.0.1"))) goto usage;
@@ -189,5 +182,5 @@ failure:
 storage_failure:
     rooms_storage_close(); accounts_close(); return 1;
 usage:
-    fprintf(stderr,"Usage: chat_server [--bind IPv4] [--port 8080] [--ttl 604800] [--log-chat] [--accounts FILE] [--rooms-db FILE] --cert FILE --key FILE\n       chat_server [--accounts FILE] --issue-invite\n       chat_server --anonymous-loopback [--port PORT]\n"); return 2;
+    fprintf(stderr,"Usage: chat_server [--bind IPv4] [--port 8080] [--ttl 604800] [--log-chat] [--accounts FILE] [--rooms-db FILE] --cert FILE --key FILE\n       chat_server --anonymous-loopback [--port PORT]\n"); return 2;
 }
