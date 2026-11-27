@@ -9,12 +9,12 @@ from zoneinfo import ZoneInfo
 from aiohttp import web, ClientSession, WSMsgType
 
 if __package__:
-    from . import bot, notices, registration
+    from . import bot, notices, email_auth
     from .backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, local_mail_only, model_completion
 else:
     import bot
     import notices
-    import registration
+    import email_auth
     from backend import C_URL, ChatError, chat_rpc, chat_ssl, deliver, local_mail_only, model_completion
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -247,22 +247,22 @@ async def proxy_ws(request):
             await asyncio.gather(relay(front,back),relay(back,front))
     return front
 
-async def registration_policy(_request):
+async def login_policy(_request):
     return web.json_response({
-        'email_registration': registration.enabled(),
+        'email_login': await asyncio.to_thread(email_auth.login_ready),
         'local_only': local_mail_only(),
     })
 
-async def registration_code(request):
+async def login_code(request):
     try:
         body = await request.json()
     except ValueError:
         return web.json_response({'error': '邮箱格式无效'}, status=400)
     email = body.get('email') if isinstance(body, dict) else None
-    status, payload = await asyncio.to_thread(registration.request_registration_code,
-                                              registration.accounts_path(), email,
-                                              registration.client_ip(request))
-    return web.json_response(payload, status=status)
+    status, payload = await asyncio.to_thread(email_auth.request_login_code,
+                                              email_auth.accounts_path(), email,
+                                              email_auth.client_ip(request))
+    return web.json_response(payload, status=status, headers={'Cache-Control': 'no-store'})
 
 async def static(request):
     name=request.match_info.get('file') or 'index.html'
@@ -362,8 +362,8 @@ def main():
         if cert:
             gateway_tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             gateway_tls.load_cert_chain(cert, key)
-        app.router.add_get('/api/register/policy', registration_policy)
-        app.router.add_post('/api/register/code', registration_code)
+        app.router.add_get('/api/login/policy', login_policy)
+        app.router.add_post('/api/login/code', login_code)
         app.router.add_route('*','/api/itinerary/{action}',api)
         notices.routes(app)
         app.cleanup_ctx.append(bot.background)

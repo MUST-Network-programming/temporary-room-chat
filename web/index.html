@@ -421,67 +421,36 @@
             aria-labelledby="account-title"
           >
             <h1 id="account-title">登录</h1>
-            <p id="account-description">使用同行账号创建或加入临时房间。</p>
-            <p id="registration-code-source" class="field-hint">首次注册请向本次活动的组织者领取一次性注册码。房间码与注册码不同；已有账号可直接登录。若页面提供邮箱领取，也可使用邮箱获取注册码。</p>
+            <p id="account-description">使用邮箱验证码登录，首次验证会创建账号。</p>
             <p class="invite-context field-hint" data-invite-context role="status" hidden></p>
             <form id="account-form" novalidate>
               <fieldset id="account-fields" class="account-fields" aria-label="账号信息">
                 <div class="account-row">
-                  <label for="account-name">用户名</label>
-                  <input
-                    id="account-name"
-                    name="username"
-                    autocomplete="username"
-                    required
-                    minlength="3"
-                    maxlength="24"
-                    pattern="[a-z0-9_]+"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
+                  <label for="account-email">邮箱</label>
+                  <input id="account-email" name="email" type="email" maxlength="254" required
+                    autocomplete="email" autocapitalize="none" spellcheck="false" />
+                  <button id="send-login-code" class="account-code-button" type="button">发送验证码</button>
                 </div>
                 <div class="account-row">
-                  <label for="account-password">密码</label>
-                  <input
-                    id="account-password"
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    required
-                    minlength="8"
-                    maxlength="128"
-                  />
-                  <button id="account-show-password" class="account-reveal" type="button" aria-label="显示密码">
-                    <span data-icon="eye" aria-hidden="true"></span>
-                    <span data-icon="eye-off" aria-hidden="true" hidden></span>
-                  </button>
+                  <label for="login-code">验证码</label>
+                  <input id="login-code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                    pattern="[0-9]{6}" maxlength="6" required />
                 </div>
-                <div id="email-register" class="account-row" hidden>
-                  <label for="register-email">邮箱</label>
-                  <input
-                    id="register-email"
-                    name="email"
-                    type="email"
-                    maxlength="254"
-                    autocomplete="email"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
-                  <button id="send-register-code" class="account-code-button" type="button">
-                    发送注册码
-                  </button>
-                </div>
-                <div id="invite-field" class="account-row" hidden>
-                  <label for="invite-code">注册码</label>
-                  <input
-                    id="invite-code"
-                    aria-describedby="registration-code-source"
-                    name="invite"
-                    maxlength="32"
-                    autocomplete="off"
-                    autocapitalize="none"
-                    spellcheck="false"
-                  />
+                <div id="legacy-account-fields" class="account-fields" hidden>
+                  <div class="account-row">
+                    <label for="account-name">旧用户名</label>
+                    <input id="account-name" name="username" autocomplete="username" maxlength="24"
+                      autocapitalize="none" spellcheck="false" />
+                  </div>
+                  <div class="account-row">
+                    <label for="account-password">旧密码</label>
+                    <input id="account-password" name="password" type="password"
+                      autocomplete="current-password" maxlength="128" />
+                    <button id="account-show-password" class="account-reveal" type="button" aria-label="显示密码">
+                      <span data-icon="eye" aria-hidden="true"></span>
+                      <span data-icon="eye-off" aria-hidden="true" hidden></span>
+                    </button>
+                  </div>
                 </div>
               </fieldset>
               <p id="account-notice" class="account-feedback" role="status" hidden></p>
@@ -490,8 +459,7 @@
                 <span id="account-submit-text">登录</span>
               </button>
               <div class="account-switch">
-                <span id="account-switch-label">没有账号？</span>
-                <button id="account-toggle" type="button">使用注册码注册</button>
+                <button id="account-toggle" type="button" aria-expanded="false" aria-controls="legacy-account-fields">迁移未绑定邮箱的旧账号</button>
               </div>
             </form>
           </section>
@@ -540,7 +508,7 @@
         <div id="notice-registration-contact" class="notice-registration-contact" hidden>
           <p id="notice-registration-address" class="field-hint"></p>
           <button id="notice-use-registration-email" class="secondary" type="button" aria-describedby="notice-registration-address">
-            使用已验证的注册邮箱
+            使用已验证的登录邮箱
           </button>
         </div>
         <p id="notice-contact-local" class="field-hint" hidden>本地预览请使用 @example.test 邮箱，并在本地收件箱查看验证码。</p>

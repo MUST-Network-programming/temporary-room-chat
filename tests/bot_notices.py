@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 from aiohttp import ClientSession, web
 
+from accounts import login_payload, seed_account
 from integration import ROOT
 
 CERTS = ROOT / 'tls/certs'
@@ -104,7 +105,8 @@ async def run(state):
         'ALLOW_EXTERNAL_EMAIL': '0', 'SMTP_HOST': '127.0.0.1', 'SMTP_PORT': str(smtp_port),
         'SMTP_FROM': 'notices@example.test', 'SMTP_USERNAME': '', 'SMTP_PASSWORD': '', 'SMTP_SSL': '0',
     }
-    configure = [str(ROOT / 'build/chat_server'), '--accounts', str(state / 'accounts.sqlite3')]
+    accounts = state / 'accounts.sqlite3'
+    configure = [str(ROOT / 'build/chat_server'), '--accounts', str(accounts)]
     command = [*configure, '--port', str(chat_port), '--ttl', '60',
                '--cert', str(CERTS / 'server.crt'), '--key', str(CERTS / 'server.key')]
     python = [sys.executable, str(ROOT / 'assistant/service.py')]
@@ -132,13 +134,10 @@ async def run(state):
         start('inbox', [*python, 'capture', '--port', str(inbox_port)])
         async with ClientSession() as session:
             # Use the gateway for account/browser traffic and raw C WSS for one chat client.
-            async def login(name, register=False, direct=False):
+            async def login(name, direct=False):
                 url = chat_url if direct else api_url + '/ws'
                 ws = await session.ws_connect(url, ssl=context)
-                payload = {'type': 'register' if register else 'login', 'name': name, 'password': 'test-password-123'}
-                if register:
-                    payload['invite'] = subprocess.check_output([*configure, '--issue-invite'], text=True).strip()
-                await ws.send_json(payload)
+                await ws.send_json(login_payload(accounts, f'{name}+login@example.test'))
                 return ws, (await until(ws, 'authenticated'))['token']
 
             async def api(action, token, payload=None, room=None, expected=200):
@@ -170,12 +169,15 @@ async def run(state):
                 assert bound['email'] == email and bound['verification_pending'] is False
 
             await ready(session, f'http://127.0.0.1:{inbox_port}')
+            await ready(session, chat_url.removesuffix('/ws').replace('wss:', 'https:'), context)
             await ready(session, api_url, context)
 
-            alice, a = await login('alice', register=True)
-            bob, b = await login('bob', register=True, direct=True)
-            claire, _ = await login('claire', register=True)
-            pat, p = await login('pat', register=True)
+            for name in ('alice', 'bob', 'claire', 'pat'):
+                seed_account(accounts, name, f'{name}+login@example.test')
+            alice, a = await login('alice')
+            bob, b = await login('bob', direct=True)
+            claire, _ = await login('claire')
+            pat, p = await login('pat')
             await bind(a, 'alice@example.test')
             await bind(b, 'bob@example.test')
             await alice.send_json({'type': 'create'})

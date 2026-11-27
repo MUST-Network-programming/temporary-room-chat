@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'web/index.html'), 'utf8');
-function page(hash = '#room=ABC123', { clipboard = true, encoder = true, app = false, email = false } = {}) {
+function page(hash = '#room=ABC123', { clipboard = true, encoder = true, app = false } = {}) {
   const dom = new JSDOM(html, { url: `https://chat.example.test/private?token=secret${hash}`, runScripts: 'outside-only' });
   const w = dom.window;
   const copies = [];
@@ -22,7 +22,7 @@ function page(hash = '#room=ABC123', { clipboard = true, encoder = true, app = f
       constructor() { this.readyState = 1; socket = this; }
       send(raw) { sent.push(JSON.parse(raw)); }
     };
-    w.fetch = async () => ({ ok: true, json: async () => ({ email_registration: email }) });
+    w.fetch = async () => ({ ok: true, json: async () => ({ challenge: "ab".repeat(32), retry_after: 60 }) });
     w.eval(fs.readFileSync(path.join(root, 'web/app.js'), 'utf8'));
   }
   if (clipboard) Object.defineProperty(w.navigator, 'clipboard', { value: { writeText: async text => copies.push(text) } });
@@ -43,8 +43,7 @@ test('invite pre-fills uppercase room only and survives account-to-lobby without
     p.get('lobby').hidden = false;
     assert.equal(p.get('room-code').value, 'ABC123');
     assert.equal(p.get('room-view').hidden, true);
-    assert.match(p.get('registration-code-source').textContent, /组织者.*一次性注册码/);
-    assert.match(p.get('registration-code-source').textContent, /房间码.*注册码.*不同/);
+    assert.match(p.get('account-description').textContent, /邮箱验证码登录/);
   } finally { p.close(); }
 });
 
@@ -120,22 +119,24 @@ test('invalid outgoing room never produces an invitation', async () => {
   } finally { p.close(); }
 });
 
-for (const register of [false, true]) test(`actual ${register ? 'registration' : 'login'} retains invitation and waits for explicit join`, async () => {
-  const p = page('#room=abc123', { app: true, email: true });
+for (const migrate of [false, true]) test(`actual ${migrate ? 'migration' : 'login'} retains invitation and waits for explicit join`, async () => {
+  const p = page('#room=abc123', { app: true });
   try {
     p.receive({ type: 'auth_mode', required: true });
     await new Promise(setImmediate);
     assert.equal(p.get('account-panel').hidden, false);
     assert.equal(p.get('room-code').value, 'ABC123');
-    if (register) {
+    if (migrate) {
       p.get('account-toggle').click();
-      assert.equal(p.get('email-register').hidden, false, 'existing optional email signup remains available');
-      p.get('invite-code').value = 'ab'.repeat(16);
+      p.get('account-name').value = 'traveler';
+      p.get('account-password').value = 'test-password';
     }
-    p.get('account-name').value = 'traveler';
-    p.get('account-password').value = 'test-password';
+    p.get('account-email').value = 'traveler@example.test';
+    p.get('send-login-code').click();
+    await new Promise(setImmediate);
+    p.get('login-code').value = '012345';
     p.get('account-form').dispatchEvent(new p.w.Event('submit', { bubbles: true, cancelable: true }));
-    assert.equal(p.sent.at(-1).type, register ? 'register' : 'login');
+    assert.equal(p.sent.at(-1).type, 'email_login');
     p.receive({ type: 'authenticated', name: 'traveler', token: 'test-account-token' });
     assert.equal(p.get('lobby').hidden, false);
     assert.equal(p.get('room-code').value, 'ABC123');

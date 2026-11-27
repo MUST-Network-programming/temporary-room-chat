@@ -8,6 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from accounts import login_payload, seed_account
 from integration import Peer, ROOT
 
 
@@ -24,7 +25,6 @@ def run(state):
     environment = {**os.environ, 'ASSISTANT_SHARED_SECRET': secret}
     command = [*configure, '--rooms-db', str(rooms), '--port', str(port),
                '--cert', str(certs / 'server.crt'), '--key', str(certs / 'server.key')]
-    invites = [subprocess.check_output([*configure, '--issue-invite'], text=True).strip() for _ in range(2)]
 
     def start(ttl=604800):
         options = ['--ttl', str(ttl)] if ttl != 604800 else []
@@ -37,19 +37,18 @@ def run(state):
         assert f'TTL={ttl}' in line, line
         return process
 
-    def authenticate(name, invite=None):
+    def authenticate(name):
         peer = Peer(port, context)
-        data = {'type': 'login', 'name': name, 'password': 'test-password-2026'}
-        if invite:
-            data.update(type='register', invite=invite)
-        peer.send(data)
+        peer.send(login_payload(accounts, f'{name}@example.test'))
         peer.until('authenticated')
         return peer
 
     first = start()
     try:
-        owner = authenticate('owner', invites[0])
-        member = authenticate('member', invites[1])
+        seed_account(accounts, 'owner', 'owner@example.test')
+        seed_account(accounts, 'member', 'member@example.test')
+        owner = authenticate('owner')
+        member = authenticate('member')
         owner.send({'type': 'create'})
         room = owner.until('joined')
         assert 604798 <= room['expires'] - time.time() <= 604800

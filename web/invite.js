@@ -14,7 +14,7 @@
     roomInput.value = room;
     roomInput.dispatchEvent(new Event('input', { bubbles: true }));
     for (const hint of document.querySelectorAll('[data-invite-context]')) {
-      hint.textContent = `邀请房间：${room}。登录后确认加入；首次注册请向组织者领取注册码。`;
+      hint.textContent = `邀请房间：${room}。用邮箱验证码登录后确认加入。`;
       hint.hidden = false;
     }
     // 复用原有的移动侧栏关闭逻辑，不改变当前房间或发送加入请求。
